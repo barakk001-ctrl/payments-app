@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.xlsx
+*.html
+yearly_summary_*.html
+.cache/
+node_modules/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/

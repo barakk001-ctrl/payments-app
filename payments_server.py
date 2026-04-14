@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""
+payments_server.py — tiny Flask server that lets you upload a payments
+Excel file through a web form and renders it using the payments_ui UI.
+
+Usage:
+    python3 payments_server.py            # http://127.0.0.1:5000
+    python3 payments_server.py 8080       # custom port
+"""
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+from flask import Flask, request
+
+from payments_ui import parse_payments, generate_html, generate_comparison_html
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
+
+UPLOAD_FORM = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Payments UI — העלאת קובץ</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f5f5f7;
+         color: #222; display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; margin: 0; padding: 20px; }
+  .card { background: #fff; padding: 32px 36px; border-radius: 12px;
+          box-shadow: 0 2px 16px rgba(0,0,0,0.08); max-width: 460px; width: 100%; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p  { color: #666; font-size: 14px; margin: 0 0 22px; }
+  .drop { display: block; border: 2px dashed #ccc; border-radius: 8px;
+          padding: 36px 16px; text-align: center; cursor: pointer;
+          transition: all 0.15s; background: #fafafa; }
+  .drop:hover, .drop.drag { border-color: #2196f3; background: #e3f2fd; }
+  .drop input { display: none; }
+  .drop .icon  { font-size: 36px; line-height: 1; margin-bottom: 10px; }
+  .drop .label { font-size: 14px; color: #444; }
+  .drop .sub   { font-size: 12px; color: #888; margin-top: 4px; }
+  .filename { margin-top: 10px; font-size: 13px; color: #1976d2; text-align: center; min-height: 18px; }
+  button { margin-top: 14px; width: 100%; padding: 12px; background: #2196f3; color: #fff;
+           border: 0; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:hover:not(:disabled) { background: #1976d2; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
+  .err { background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 6px;
+         font-size: 13px; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>העלאת קובץ עסקאות</h1>
+    <p>בחרו קובץ Excel (.xlsx) של פירוט חיובים, או קובץ JSON שנשמר קודם — כדי לייצר תצוגה אינטראקטיבית.</p>
+    __ERROR__
+    <form id="form" action="/upload" method="POST" enctype="multipart/form-data">
+      <label class="drop" id="drop">
+        <div class="icon">📄</div>
+        <div class="label">גררו קובץ או לחצו לבחירה</div>
+        <div class="sub">.xlsx / .json · עד 16MB</div>
+        <input type="file" name="file" id="file" accept=".xlsx,.json" required>
+      </label>
+      <div class="filename" id="filename"></div>
+      <button type="submit" id="submit" disabled>יצירת תצוגה</button>
+    </form>
+    <div style="text-align:center;margin-top:16px;font-size:13px;">
+      <a href="/compare" style="color:#2196f3;text-decoration:none;">השוואה בין שני חודשים →</a>
+    </div>
+  </div>
+<script>
+  const drop = document.getElementById('drop');
+  const file = document.getElementById('file');
+  const name = document.getElementById('filename');
+  const submit = document.getElementById('submit');
+  const form = document.getElementById('form');
+
+  function update() {
+    if (file.files.length) {
+      name.textContent = file.files[0].name;
+      submit.disabled = false;
+    }
+  }
+  file.addEventListener('change', update);
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('drag');
+    if (e.dataTransfer.files.length) {
+      file.files = e.dataTransfer.files;
+      update();
+    }
+  });
+  form.addEventListener('submit', () => {
+    submit.disabled = true;
+    submit.textContent = 'מעבד...';
+  });
+</script>
+</body>
+</html>
+"""
+
+
+COMPARE_FORM = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Payments UI — השוואת חודשים</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f5f5f7;
+         color: #222; display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; margin: 0; padding: 20px; }
+  .card { background: #fff; padding: 32px 36px; border-radius: 12px;
+          box-shadow: 0 2px 16px rgba(0,0,0,0.08); max-width: 520px; width: 100%; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p  { color: #666; font-size: 14px; margin: 0 0 22px; }
+  .row { display: flex; gap: 12px; }
+  .slot { flex: 1; }
+  .slot label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; font-weight: 600; }
+  .drop { display: block; border: 2px dashed #ccc; border-radius: 8px;
+          padding: 28px 12px; text-align: center; cursor: pointer;
+          transition: all 0.15s; background: #fafafa; }
+  .drop:hover, .drop.drag { border-color: #2196f3; background: #e3f2fd; }
+  .drop input { display: none; }
+  .drop .icon  { font-size: 28px; line-height: 1; margin-bottom: 6px; }
+  .drop .label { font-size: 13px; color: #444; }
+  .drop .sub   { font-size: 11px; color: #888; margin-top: 2px; }
+  .fname { margin-top: 6px; font-size: 12px; color: #1976d2; text-align: center; min-height: 16px; }
+  button { margin-top: 18px; width: 100%; padding: 12px; background: #2196f3; color: #fff;
+           border: 0; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:hover:not(:disabled) { background: #1976d2; }
+  button:disabled { background: #ccc; cursor: not-allowed; }
+  .err { background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 6px;
+         font-size: 13px; margin-bottom: 14px; }
+  .back { display: block; text-align: center; margin-top: 16px; font-size: 13px; color: #2196f3; text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>השוואת שני חודשים</h1>
+    <p>העלו שני קבצי .xlsx או .json (למשל ינואר ופברואר) כדי לראות שינויים לפי ענף ובית עסק.</p>
+    __ERROR__
+    <form id="form" action="/compare" method="POST" enctype="multipart/form-data">
+      <div class="row">
+        <div class="slot">
+          <label>חודש א'</label>
+          <label class="drop" data-for="file_a">
+            <div class="icon">📄</div>
+            <div class="label">בחרו קובץ</div>
+            <div class="sub">.xlsx / .json</div>
+            <input type="file" name="file_a" id="file_a" accept=".xlsx,.json" required>
+          </label>
+          <div class="fname" id="fname_a"></div>
+        </div>
+        <div class="slot">
+          <label>חודש ב'</label>
+          <label class="drop" data-for="file_b">
+            <div class="icon">📄</div>
+            <div class="label">בחרו קובץ</div>
+            <div class="sub">.xlsx / .json</div>
+            <input type="file" name="file_b" id="file_b" accept=".xlsx,.json" required>
+          </label>
+          <div class="fname" id="fname_b"></div>
+        </div>
+      </div>
+      <button type="submit" id="submit" disabled>השוואה</button>
+    </form>
+    <a class="back" href="/">← חזרה לקובץ בודד</a>
+  </div>
+<script>
+  const fileA = document.getElementById('file_a');
+  const fileB = document.getElementById('file_b');
+  const submit = document.getElementById('submit');
+
+  function update() {
+    document.getElementById('fname_a').textContent = fileA.files[0]?.name || '';
+    document.getElementById('fname_b').textContent = fileB.files[0]?.name || '';
+    submit.disabled = !(fileA.files.length && fileB.files.length);
+  }
+  [fileA, fileB].forEach(f => f.addEventListener('change', update));
+
+  document.querySelectorAll('.drop').forEach(d => {
+    const input = document.getElementById(d.dataset.for);
+    d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('drag'); });
+    d.addEventListener('dragleave', () => d.classList.remove('drag'));
+    d.addEventListener('drop', e => {
+      e.preventDefault();
+      d.classList.remove('drag');
+      if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; update(); }
+    });
+  });
+
+  document.getElementById('form').addEventListener('submit', () => {
+    submit.disabled = true;
+    submit.textContent = 'מעבד...';
+  });
+</script>
+</body>
+</html>
+"""
+
+
+def render_form(error: str | None = None) -> str:
+    err_html = f'<div class="err">{error}</div>' if error else ""
+    return UPLOAD_FORM.replace("__ERROR__", err_html)
+
+
+def render_compare_form(error: str | None = None) -> str:
+    err_html = f'<div class="err">{error}</div>' if error else ""
+    return COMPARE_FORM.replace("__ERROR__", err_html)
+
+
+def _parse_upload(f) -> dict:
+    """Save an uploaded file to a temp path, parse it, and clean up.
+    Accepts .xlsx (Excel) or .json (previously saved via the Save JSON button).
+    """
+    fname = f.filename.lower()
+    if fname.endswith(".json"):
+        data = json.loads(f.read().decode("utf-8"))
+        # Ensure required keys exist
+        if "payments" not in data:
+            raise ValueError("JSON חסר מפתח 'payments'")
+        data.setdefault("title", Path(f.filename).stem)
+        data.setdefault("source", f.filename)
+        data.setdefault("issuer", "")
+        # Re-normalize canonical names in case they're missing
+        from payments_ui import _normalize_merchant
+        for p in data["payments"]:
+            if "canonical" not in p:
+                p["canonical"] = _normalize_merchant(p.get("merchant", ""))
+        return data
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        f.save(tmp.name)
+        tmp_path = Path(tmp.name)
+    try:
+        data = parse_payments(tmp_path)
+        if data["title"] == tmp_path.stem:
+            data["title"] = Path(f.filename).stem
+        data["source"] = f.filename
+        return data
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+@app.get("/")
+def index():
+    return render_form()
+
+
+@app.get("/compare")
+def compare_form():
+    return render_compare_form()
+
+
+@app.post("/compare")
+def compare():
+    fa = request.files.get("file_a")
+    fb = request.files.get("file_b")
+    if not fa or not fa.filename or not fb or not fb.filename:
+        return render_compare_form("יש לבחור שני קבצים."), 400
+    for f in (fa, fb):
+        if not f.filename.lower().endswith((".xlsx", ".json")):
+            return render_compare_form("יש להעלות קבצי .xlsx או .json בלבד."), 400
+
+    try:
+        data_a = _parse_upload(fa)
+        data_b = _parse_upload(fb)
+        html = generate_comparison_html(data_a, data_b)
+    except Exception as e:
+        return render_compare_form(f"כשל בקריאת הקבצים: {e}"), 400
+
+    return html
+
+
+@app.post("/upload")
+def upload():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return render_form("לא נבחר קובץ."), 400
+    if not f.filename.lower().endswith((".xlsx", ".json")):
+        return render_form("יש להעלות קובץ .xlsx או .json בלבד."), 400
+
+    try:
+        data = _parse_upload(f)
+        return generate_html(data)
+    except Exception as e:
+        return render_form(f"כשל בקריאת הקובץ: {e}"), 400
+
+
+def main() -> int:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    port = int(args[0]) if args else 5000
+    url = f"http://127.0.0.1:{port}"
+    print(f"Serving on {url}  (Ctrl-C to stop)")
+
+    if "--open" in sys.argv:
+        import threading
+        import webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    app.run(host="0.0.0.0", port=port, debug=False)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

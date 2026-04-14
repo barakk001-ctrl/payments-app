@@ -1,0 +1,1528 @@
+#!/usr/bin/env python3
+"""
+payments_ui.py — parse a credit-card Excel file and generate a web UI.
+
+Usage:
+    python3 payments_ui.py "april payments.xlsx" [output.html]
+
+Reads the transactions sheet, writes a self-contained HTML file with:
+  * summary cards (total / regular / non-regular / high)
+  * charts: category breakdown, daily trend, top merchants
+  * flagged table of non-regular or high payments
+  * possible duplicate charges
+  * recurring subscriptions / standing orders
+  * open installment plans with remaining balance
+  * the full transactions table with search, filters, sorting
+  * dark mode toggle
+"""
+from __future__ import annotations
+
+import datetime
+import json
+import re
+import sys
+import webbrowser
+from collections import defaultdict
+from pathlib import Path
+
+import openpyxl
+
+HIGH_THRESHOLD = 500  # ILS — charges at/above this are flagged as "high"
+REGULAR_TYPE = "רגילה"
+
+# ---------------------------------------------------------------------------
+# Merchant normalization
+# ---------------------------------------------------------------------------
+
+# Phrases removed verbatim from merchant names before canonicalization.
+_SUFFIX_PHRASES = [
+    "- עסקאות בהרשאה", "עסקאות בהרשאה",
+    "- הו\"ק", "- הו״ק", "הו\"ק", "הו״ק", "הוראת קבע",
+    "בע\"מ", "בע״מ",
+    "- אונליין- צמרת", "-אונליין",
+    "חשבונית חודשית",
+    "און ליין", "אונליין",
+    "-גמא", "-מזרחי",
+]
+
+# Location tokens that get stripped to collapse store branches together.
+_LOCATION_WORDS = [
+    "אם המושבות", "פתח תקווה", "פ\"ת", "פ״ת", "גיסין", "בשוק",
+]
+
+# Explicit merchant aliases — highest priority, applied before regex work.
+_CANONICAL_MAP = {
+    "BIT": "BIT",
+    "PAYBOX": "PAYBOX",
+    "WOLT": "Wolt",
+    "aliexpress": "AliExpress",
+    "APPLE.COM/BILL": "Apple",
+    "SpotifyIL": "Spotify",
+    "ביי-מי שוברי מתנה": "ביי-מי שוברי מתנה",
+}
+
+_BRANCH_RE = re.compile(r"[-\s]+\d+\s*$")
+_WHITESPACE_RE = re.compile(r"\s+")
+_INSTALLMENT_RE = re.compile(r"תשלום\s*(\d+)\s*(?:מתוך|/)\s*(\d+)")
+
+
+def _normalize_merchant(name: str) -> str:
+    """Return a canonical version of a merchant name, stripping branches and locations."""
+    if not name:
+        return name
+    s = name.strip()
+
+    # Exact alias lookup first.
+    if s in _CANONICAL_MAP:
+        return _CANONICAL_MAP[s]
+
+    for phrase in _SUFFIX_PHRASES:
+        s = s.replace(phrase, " ")
+    for loc in _LOCATION_WORDS:
+        s = s.replace(loc, " ")
+
+    s = _BRANCH_RE.sub("", s)
+    s = _WHITESPACE_RE.sub(" ", s).strip(" -—·")
+    return s or name.strip()
+
+
+# ---------------------------------------------------------------------------
+# Parsing
+# ---------------------------------------------------------------------------
+
+
+def parse_payments(xlsx_path: Path) -> dict:
+    """Parse a payments Excel file, auto-detecting the issuer format.
+
+    Supported layouts:
+      * Cal / בינלאומי הראשון — header row starts with "תאריך עסקה"
+      * Isracard (ישראכרט)    — header row starts with "תאריך רכישה"
+    """
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+
+    fmt, header_idx = _detect_format(rows)
+    if fmt is None:
+        raise ValueError(
+            "Unrecognized payments file format "
+            "(expected Cal / בינלאומי הראשון or Isracard)"
+        )
+
+    title = _extract_title(rows, xlsx_path)
+    data_rows = rows[header_idx + 1:]
+
+    if fmt == "cal":
+        payments = _parse_cal_rows(data_rows)
+    else:  # isracard
+        payments = _parse_isracard_rows(data_rows)
+
+    for p in payments:
+        p["canonical"] = _normalize_merchant(p["merchant"])
+
+    return {
+        "title": title,
+        "source": xlsx_path.name,
+        "issuer": fmt,
+        "payments": payments,
+    }
+
+
+def _detect_format(rows):
+    """Return ('cal'|'isracard', header_row_index) or (None, -1)."""
+    for i, row in enumerate(rows):
+        if not row or not isinstance(row[0], str):
+            continue
+        h = row[0]
+        if "תאריך\nעסקה" in h or h.strip() == "תאריך עסקה":
+            return "cal", i
+        if "תאריך רכישה" in h:
+            return "isracard", i
+    return None, -1
+
+
+def _extract_title(rows, xlsx_path: Path) -> str:
+    """Use the first non-empty row as the document title."""
+    for row in rows:
+        if not row:
+            continue
+        parts = [c.strip() for c in row if isinstance(c, str) and c.strip()]
+        if parts:
+            return " · ".join(parts) if len(parts) > 1 else parts[0]
+    return xlsx_path.stem
+
+
+def _fmt_date(value) -> str:
+    if isinstance(value, datetime.datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, str):
+        for pattern in ("%d.%m.%y", "%d/%m/%Y", "%d/%m/%y"):
+            try:
+                return datetime.datetime.strptime(value.strip(), pattern).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return value.strip()
+    return ""
+
+
+def _parse_cal_rows(rows) -> list[dict]:
+    payments = []
+    for row in rows:
+        row = list(row) + [None] * max(0, 7 - len(row))
+        date, merchant, amount, charge, ttype, category, notes = row[:7]
+        if not isinstance(merchant, str) or not isinstance(charge, (int, float)):
+            continue
+        payments.append({
+            "date": _fmt_date(date),
+            "merchant": merchant.strip(),
+            "amount": float(amount) if isinstance(amount, (int, float)) else 0.0,
+            "charge": float(charge),
+            "type": (ttype or "").strip(),
+            "category": (category or "").strip(),
+            "notes": (notes or "").strip() if isinstance(notes, str) else "",
+        })
+    return payments
+
+
+def _parse_isracard_rows(rows) -> list[dict]:
+    """Isracard columns: date, merchant, amount, amt_curr, charge, chg_curr, voucher, extras."""
+    payments = []
+    for row in rows:
+        row = list(row) + [None] * max(0, 8 - len(row))
+        date, merchant, amount, amt_curr, charge, chg_curr, _voucher, extras = row[:8]
+        if date is None or not isinstance(merchant, str) or not isinstance(charge, (int, float)):
+            continue
+
+        extras_text = extras.strip() if isinstance(extras, str) else ""
+
+        if "תשלום" in extras_text:
+            ttype = "תשלומים"
+        elif "הוראת קבע" in extras_text:
+            ttype = "הוראת קבע"
+        elif "זיכוי" in extras_text or charge < 0:
+            ttype = "זיכוי"
+        else:
+            ttype = REGULAR_TYPE
+
+        category = ""
+        if isinstance(amt_curr, str) and amt_curr.strip() and amt_curr.strip() != "₪":
+            category = f"חו\"ל ({amt_curr.strip()})"
+
+        payments.append({
+            "date": _fmt_date(date),
+            "merchant": merchant.strip(),
+            "amount": float(amount) if isinstance(amount, (int, float)) else 0.0,
+            "charge": float(charge),
+            "type": ttype,
+            "category": category,
+            "notes": extras_text,
+        })
+    return payments
+
+
+# ---------------------------------------------------------------------------
+# Summary & insights
+# ---------------------------------------------------------------------------
+
+
+def build_summary(payments: list[dict]) -> dict:
+    regular = [p for p in payments if p["type"] == REGULAR_TYPE]
+    non_regular = [p for p in payments if p["type"] and p["type"] != REGULAR_TYPE]
+    high = [p for p in payments if p["charge"] >= HIGH_THRESHOLD]
+    return {
+        "total_count": len(payments),
+        "total_amount": sum(p["charge"] for p in payments),
+        "regular_count": len(regular),
+        "regular_amount": sum(p["charge"] for p in regular),
+        "non_regular_count": len(non_regular),
+        "non_regular_amount": sum(p["charge"] for p in non_regular),
+        "high_count": len(high),
+        "high_amount": sum(p["charge"] for p in high),
+    }
+
+
+def _parse_installment(notes: str):
+    m = _INSTALLMENT_RE.search(notes or "")
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def build_insights(payments: list[dict]) -> dict:
+    """Compute analytics: categories, top merchants, daily trend, duplicates, subs, installments."""
+    # Category breakdown
+    cats = defaultdict(lambda: {"count": 0, "total": 0.0})
+    for p in payments:
+        c = p["category"] or "ללא קטגוריה"
+        cats[c]["count"] += 1
+        cats[c]["total"] += p["charge"]
+    categories = sorted(
+        [{"name": k, **v} for k, v in cats.items()],
+        key=lambda x: x["total"],
+        reverse=True,
+    )
+
+    # Top merchants (by canonical name)
+    merchants = defaultdict(lambda: {"count": 0, "total": 0.0, "aliases": set()})
+    for p in payments:
+        m = p.get("canonical") or p["merchant"]
+        merchants[m]["count"] += 1
+        merchants[m]["total"] += p["charge"]
+        merchants[m]["aliases"].add(p["merchant"])
+    top_merchants = sorted(
+        [
+            {
+                "name": k,
+                "count": v["count"],
+                "total": v["total"],
+                "aliases": sorted(v["aliases"]),
+            }
+            for k, v in merchants.items()
+        ],
+        key=lambda x: x["total"],
+        reverse=True,
+    )[:20]
+
+    # Daily spending trend
+    days = defaultdict(float)
+    for p in payments:
+        if p["date"]:
+            days[p["date"]] += p["charge"]
+    daily_trend = sorted(
+        [{"date": d, "total": round(t, 2)} for d, t in days.items()],
+        key=lambda x: x["date"],
+    )
+
+    # Duplicate detection: same canonical merchant + same amount + same date
+    dup_groups = defaultdict(list)
+    for p in payments:
+        key = (p.get("canonical") or p["merchant"], round(p["charge"], 2), p["date"])
+        dup_groups[key].append(p)
+    duplicates = []
+    for (merchant, amount, date), items in dup_groups.items():
+        if len(items) >= 2 and amount > 0:
+            duplicates.append({
+                "merchant": merchant,
+                "amount": amount,
+                "date": date,
+                "count": len(items),
+                "total": round(amount * len(items), 2),
+            })
+    duplicates.sort(key=lambda x: (-x["total"], x["date"]))
+
+    # Subscriptions / recurring charges (standing orders)
+    sub_groups = defaultdict(lambda: {"count": 0, "total": 0.0, "amounts": set(), "dates": []})
+    for p in payments:
+        if p["type"] == "הוראת קבע":
+            key = p.get("canonical") or p["merchant"]
+            sub_groups[key]["count"] += 1
+            sub_groups[key]["total"] += p["charge"]
+            sub_groups[key]["amounts"].add(round(p["charge"], 2))
+            sub_groups[key]["dates"].append(p["date"])
+    subscriptions = sorted(
+        [
+            {
+                "merchant": k,
+                "count": v["count"],
+                "total": round(v["total"], 2),
+                "amounts": sorted(v["amounts"]),
+                "dates": sorted(v["dates"]),
+            }
+            for k, v in sub_groups.items()
+        ],
+        key=lambda x: x["total"],
+        reverse=True,
+    )
+
+    # Open installment plans with remaining balance
+    installments = []
+    for p in payments:
+        is_installment = p["type"] == "תשלומים" or "תשלום" in (p["notes"] or "")
+        if not is_installment:
+            continue
+        parsed = _parse_installment(p["notes"] or "")
+        if parsed:
+            current, total_count = parsed
+            remaining_count = max(total_count - current, 0)
+            remaining_amount = round(remaining_count * p["charge"], 2)
+        else:
+            current, total_count, remaining_count, remaining_amount = 0, 0, 0, 0.0
+        installments.append({
+            "date": p["date"],
+            "merchant": p.get("canonical") or p["merchant"],
+            "charge": round(p["charge"], 2),
+            "current": current,
+            "total": total_count,
+            "remaining_count": remaining_count,
+            "remaining_amount": remaining_amount,
+            "notes": p["notes"] or "",
+        })
+    installments.sort(key=lambda x: -x["remaining_amount"])
+    total_remaining = round(sum(i["remaining_amount"] for i in installments), 2)
+
+    return {
+        "categories": categories,
+        "top_merchants": top_merchants,
+        "daily_trend": daily_trend,
+        "duplicates": duplicates,
+        "subscriptions": subscriptions,
+        "installments": installments,
+        "total_installment_remaining": total_remaining,
+    }
+
+
+# ---------------------------------------------------------------------------
+# HTML rendering
+# ---------------------------------------------------------------------------
+
+HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>__TITLE__</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #ffffff; --text: #222; --muted: #666; --soft: #888;
+    --border: #eee; --border-strong: #ddd; --hover: #f8f8fb; --th-bg: #fafafa;
+    --th-hover: #eef; --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --primary: #2196f3; --high: #c62828; --refund: #2e7d32;
+    --chip-bg: #fafafa;
+    --b-reg-bg: #e3f2fd; --b-reg-fg: #1565c0;
+    --b-stand-bg: #fff3e0; --b-stand-fg: #e65100;
+    --b-inst-bg: #f3e5f5; --b-inst-fg: #6a1b9a;
+    --b-ref-bg: #e8f5e9; --b-ref-fg: #2e7d32;
+    --b-rep-bg: #fff8e1; --b-rep-fg: #8d6e63;
+    --b-other-bg: #eee; --b-other-fg: #555;
+  }
+  [data-theme="dark"] {
+    --bg: #111418; --card: #1c2128; --text: #e6edf3; --muted: #9aa4af; --soft: #7a8591;
+    --border: #2a323c; --border-strong: #394350; --hover: #232b36; --th-bg: #1a2028;
+    --th-hover: #222d3d; --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --primary: #64b5f6; --high: #ef5350; --refund: #66bb6a;
+    --chip-bg: #1a2028;
+    --b-reg-bg: #0d3b66; --b-reg-fg: #9fd3ff;
+    --b-stand-bg: #4a2900; --b-stand-fg: #ffcc80;
+    --b-inst-bg: #3a1c4a; --b-inst-fg: #ce93d8;
+    --b-ref-bg: #1b4d20; --b-ref-fg: #a5d6a7;
+    --b-rep-bg: #3f2f00; --b-rep-fg: #d7ccc8;
+    --b-other-bg: #2a323c; --b-other-fg: #aaa;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; padding: 24px;
+         background: var(--bg); color: var(--text); transition: background 0.2s, color 0.2s; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+  header h1 { font-size: 20px; margin: 0 0 4px; }
+  .src { color: var(--soft); font-size: 12px; }
+  .theme-toggle { background: var(--card); color: var(--text); border: 1px solid var(--border-strong);
+                  width: 40px; height: 40px; border-radius: 10px; cursor: pointer; font-size: 18px;
+                  box-shadow: var(--shadow); }
+  .theme-toggle:hover { background: var(--hover); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); padding: 16px; border-radius: 10px; box-shadow: var(--shadow); }
+  .card .label { font-size: 11px; color: var(--muted); letter-spacing: 0.5px; }
+  .card .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .card .sub { font-size: 12px; color: var(--soft); margin-top: 2px; }
+  .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .chart-card { background: var(--card); padding: 16px 20px; border-radius: 10px; box-shadow: var(--shadow); min-height: 320px; }
+  .chart-card h2 { margin: 0 0 12px; font-size: 15px; }
+  .chart-wrap { position: relative; height: 260px; }
+  .section { background: var(--card); padding: 16px 20px; border-radius: 10px; box-shadow: var(--shadow); margin-bottom: 20px; }
+  .section > h2 { margin: 0 0 12px; font-size: 16px; cursor: pointer; user-select: none; }
+  .section.collapsed > :not(h2) { display: none; }
+  .section > h2::before { content: "▾"; display: inline-block; width: 1em; font-size: 11px; color: var(--muted); transform: scaleX(-1); }
+  .section.collapsed > h2::before { content: "▸"; transform: scaleX(-1); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; vertical-align: top; }
+  th { background: var(--th-bg); cursor: pointer; user-select: none; font-weight: 600; font-size: 13px; color: var(--text); }
+  th:hover { background: var(--th-hover); }
+  tr:hover td { background: var(--hover); }
+  .filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filter input, .filter select { padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 6px;
+                                   font-size: 14px; font-family: inherit; background: var(--card); color: var(--text); }
+  .filter input { min-width: 220px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-regular     { background: var(--b-reg-bg);   color: var(--b-reg-fg); }
+  .badge-standing    { background: var(--b-stand-bg); color: var(--b-stand-fg); }
+  .badge-installment { background: var(--b-inst-bg);  color: var(--b-inst-fg); }
+  .badge-refund      { background: var(--b-ref-bg);   color: var(--b-ref-fg); }
+  .badge-repay       { background: var(--b-rep-bg);   color: var(--b-rep-fg); }
+  .badge-other       { background: var(--b-other-bg); color: var(--b-other-fg); }
+  .amount-high { color: var(--high); font-weight: 600; }
+  .amount-refund { color: var(--refund); }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .reason { color: var(--muted); font-size: 12px; }
+  .count { color: var(--soft); font-size: 12px; font-weight: normal; margin-right: 6px; }
+  .aliases { color: var(--soft); font-size: 11px; }
+  .empty { color: var(--soft); font-style: italic; padding: 8px 0; }
+  .sum-row td { border-top: 2px solid var(--border-strong); border-bottom: none; font-weight: 700; background: var(--th-bg); }
+  .chk-col { width: 32px; text-align: center !important; padding: 6px 4px !important; }
+  .chk-col input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primary); }
+  .insights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .insight-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
+    border-radius: 8px; border-right: 4px solid transparent; background: var(--bg); font-size: 14px; line-height: 1.5; }
+  .insight-card.ok   { border-color: #43a047; }
+  .insight-card.warn { border-color: #fb8c00; }
+  .insight-card.alert{ border-color: var(--high); }
+  .insight-card .ic  { font-size: 20px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
+  .insight-card .body { flex: 1; color: var(--text); }
+  .insight-card .body strong { color: var(--primary); font-weight: 700; }
+  .floating-bar { position: fixed; bottom: -400px; left: 50%; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--border-strong); box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+    border-radius: 14px; padding: 12px 20px;
+    display: flex; flex-direction: column; gap: 0;
+    font-size: 15px; font-weight: 600; z-index: 100; transition: bottom 0.3s ease;
+    min-width: 340px; max-width: 540px; width: 90%; }
+  .floating-bar.visible { bottom: 24px; }
+  .floating-bar .bar-top { display: flex; align-items: center; gap: 16px; white-space: nowrap; flex-wrap: wrap; }
+  .floating-bar .sel-total { color: var(--primary); }
+  .floating-bar button { background: none; border: 1px solid var(--border-strong); color: var(--muted);
+    padding: 4px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .floating-bar button:hover { background: var(--hover); color: var(--text); }
+  .floating-bar .sel-items { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px;
+    max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+  .floating-bar .sel-item { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 3px 2px; font-size: 13px; font-weight: 400; border-bottom: 1px solid var(--border); }
+  .floating-bar .sel-item:last-child { border-bottom: none; }
+  .floating-bar .sel-item .item-label { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+  .floating-bar .sel-item .item-amount { font-weight: 600; white-space: nowrap; padding-right: 12px; color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1 id="title"></h1>
+    <div class="src" id="src"></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:flex-start;">
+    <a href="/" class="theme-toggle" title="העלאת קובץ חדש" style="width:auto;padding:0 14px;font-size:13px;font-weight:600;text-decoration:none;display:flex;align-items:center;height:40px;">← קובץ חדש</a>
+    <button class="theme-toggle" id="btn-save-html" title="שמור כ-HTML לצפייה ללא שרת" style="width:auto;padding:0 14px;font-size:13px;font-weight:600;">💾 שמור HTML</button>
+    <button class="theme-toggle" id="btn-save" title="שמור כ-JSON לטעינה מחדש ללא Excel" style="width:auto;padding:0 14px;font-size:13px;font-weight:600;">💾 שמור JSON</button>
+    <button class="theme-toggle" id="theme-toggle" title="החלף מצב כהה/בהיר">🌙</button>
+  </div>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<div class="charts-grid">
+  <div class="chart-card"><h2>חלוקה לפי ענף</h2><div class="chart-wrap"><canvas id="chart-category"></canvas></div></div>
+  <div class="chart-card"><h2>מגמה יומית</h2><div class="chart-wrap"><canvas id="chart-daily"></canvas></div></div>
+  <div class="chart-card"><h2>Top בתי עסק</h2><div class="chart-wrap"><canvas id="chart-merchants"></canvas></div></div>
+</div>
+
+<div class="section" id="sec-insights">
+  <h2>תובנות חכמות 🧠</h2>
+  <div class="insights-grid" id="insights-grid"></div>
+</div>
+
+<div class="section" id="sec-flagged">
+  <h2>סיכום חריגים — לא רגילות או סכום גבוה <span class="count" id="flagged-count"></span></h2>
+  <table id="flagged-table">
+    <thead><tr>
+      <th class="chk-col"><input type="checkbox" class="select-all"></th><th>תאריך</th><th>בית עסק</th><th>סוג</th><th>ענף</th><th>סכום (₪)</th><th>סיבה</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="section" id="sec-duplicates">
+  <h2>תשלומים כפולים אפשריים <span class="count" id="duplicates-count"></span></h2>
+  <table id="duplicates-table">
+    <thead><tr>
+      <th class="chk-col"><input type="checkbox" class="select-all"></th><th>תאריך</th><th>בית עסק</th><th>סכום בודד (₪)</th><th>חזרות</th><th>סה"כ (₪)</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="section" id="sec-subscriptions">
+  <h2>מנויים והוראות קבע <span class="count" id="subscriptions-count"></span></h2>
+  <table id="subscriptions-table">
+    <thead><tr>
+      <th class="chk-col"><input type="checkbox" class="select-all"></th><th>בית עסק</th><th>חיובים בחודש</th><th>סכומים (₪)</th><th>סה"כ (₪)</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="section" id="sec-installments">
+  <h2>תשלומים פתוחים <span class="count" id="installments-count"></span></h2>
+  <div class="filter"><div class="src" id="installments-remaining"></div></div>
+  <table id="installments-table">
+    <thead><tr>
+      <th class="chk-col"><input type="checkbox" class="select-all"></th><th>תאריך</th><th>בית עסק</th><th>תשלום חודשי (₪)</th><th>תשלום נוכחי</th><th>נותרו</th><th>יתרה (₪)</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="section" id="sec-merchants">
+  <h2>Top בתי עסק (לפי סכום) <span class="count" id="merchants-count"></span></h2>
+  <table id="merchants-table">
+    <thead><tr>
+      <th class="chk-col"><input type="checkbox" class="select-all"></th><th>בית עסק</th><th>עסקאות</th><th>סה"כ (₪)</th><th>ממוצע (₪)</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="section" id="sec-all">
+  <h2>כל העסקאות <span class="count" id="all-count"></span></h2>
+  <div class="filter">
+    <input id="search" type="text" placeholder="חיפוש בית עסק / ענף...">
+    <select id="type-filter"><option value="">כל הסוגים</option></select>
+    <select id="category-filter"><option value="">כל הענפים</option></select>
+  </div>
+  <table id="all-table">
+    <thead><tr>
+      <th class="chk-col"><input type="checkbox" class="select-all"></th>
+      <th data-k="date">תאריך</th>
+      <th data-k="merchant">בית עסק</th>
+      <th data-k="type">סוג</th>
+      <th data-k="category">ענף</th>
+      <th data-k="charge">סכום (₪)</th>
+      <th data-k="notes">הערות</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="floating-bar" id="floating-bar">
+  <div class="bar-top">
+    <span id="sel-summary"></span>
+    <span class="sel-total" id="sel-total"></span>
+    <button id="sel-clear">נקה בחירה</button>
+  </div>
+  <div class="sel-items" id="sel-items"></div>
+</div>
+
+<script>
+const DATA = __DATA__;
+
+const fmt = n => new Intl.NumberFormat('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+const fmt0 = n => new Intl.NumberFormat('he-IL', { maximumFractionDigits: 0 }).format(n);
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function typeBadge(t) {
+  const map = { 'רגילה':'regular','הוראת קבע':'standing','תשלומים':'installment','זיכוי':'refund','פרעון':'repay' };
+  const cls = map[t] || 'other';
+  return `<span class="badge badge-${cls}">${esc(t || '—')}</span>`;
+}
+
+function amountClass(p) {
+  if (p.charge < 0) return 'amount-refund';
+  if (p.charge >= DATA.high_threshold) return 'amount-high';
+  return '';
+}
+
+// -------------------- Dark mode --------------------
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.getElementById('theme-toggle').textContent = t === 'dark' ? '☀️' : '🌙';
+  renderCharts(); // rebuild with new theme colors
+}
+function initTheme() {
+  const saved = localStorage.getItem('payments-theme') ||
+    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  applyTheme(saved);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const cur = document.documentElement.dataset.theme;
+    const next = cur === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('payments-theme', next);
+    applyTheme(next);
+  });
+}
+
+// -------------------- Cards --------------------
+
+function renderCards() {
+  const s = DATA.summary;
+  document.getElementById('title').textContent = DATA.title;
+  document.getElementById('src').textContent = 'מקור: ' + DATA.source;
+  const cards = [
+    ['סה"כ עסקאות', s.total_count, 'חיוב כולל: ₪' + fmt(s.total_amount)],
+    ['רגילות', s.regular_count, '₪' + fmt(s.regular_amount)],
+    ['לא רגילות', s.non_regular_count, '₪' + fmt(s.non_regular_amount)],
+    ['סכום גבוה (≥ ₪' + DATA.high_threshold + ')', s.high_count, '₪' + fmt(s.high_amount)],
+  ];
+  document.getElementById('cards').innerHTML = cards
+    .map(([l, v, sub]) => `<div class="card"><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="sub">${esc(sub)}</div></div>`)
+    .join('');
+}
+
+// -------------------- Charts --------------------
+
+let charts = {};
+function destroyCharts() { Object.values(charts).forEach(c => c && c.destroy()); charts = {}; }
+
+function chartColors(n) {
+  const base = ['#2196f3','#ef6c00','#43a047','#8e24aa','#e53935','#00acc1','#fb8c00','#6d4c41','#546e7a','#d81b60','#7cb342','#3949ab'];
+  return Array.from({ length: n }, (_, i) => base[i % base.length]);
+}
+
+function renderCharts() {
+  if (typeof Chart === 'undefined') return;
+  destroyCharts();
+  const text = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#222';
+  const grid = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#eee';
+  Chart.defaults.color = text;
+  Chart.defaults.borderColor = grid;
+
+  const ins = DATA.insights;
+
+  // Category doughnut
+  const cats = ins.categories.slice(0, 10);
+  charts.cat = new Chart(document.getElementById('chart-category'), {
+    type: 'doughnut',
+    data: {
+      labels: cats.map(c => c.name),
+      datasets: [{ data: cats.map(c => c.total), backgroundColor: chartColors(cats.length), borderWidth: 0 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
+
+  // Daily trend line
+  const dt = ins.daily_trend;
+  charts.daily = new Chart(document.getElementById('chart-daily'), {
+    type: 'line',
+    data: {
+      labels: dt.map(d => d.date.slice(5)),
+      datasets: [{ data: dt.map(d => d.total), borderColor: '#2196f3', backgroundColor: 'rgba(33,150,243,0.15)', tension: 0.3, fill: true, pointRadius: 2 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 } } },
+        y: { ticks: { callback: v => '₪' + fmt0(v), font: { size: 10 } } },
+      },
+    },
+  });
+
+  // Top merchants horizontal bar
+  const tm = ins.top_merchants.slice(0, 10);
+  charts.merchants = new Chart(document.getElementById('chart-merchants'), {
+    type: 'bar',
+    data: {
+      labels: tm.map(m => m.name),
+      datasets: [{ data: tm.map(m => m.total), backgroundColor: '#43a047' }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { callback: v => '₪' + fmt0(v), font: { size: 10 } } },
+        y: { ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// -------------------- Tables --------------------
+
+function renderFlagged() {
+  const rows = DATA.payments.map(p => {
+    const reasons = [];
+    if (p.type && p.type !== 'רגילה') reasons.push('סוג: ' + p.type);
+    if (p.charge >= DATA.high_threshold) reasons.push('סכום גבוה');
+    return { p, reasons };
+  }).filter(x => x.reasons.length > 0);
+  rows.sort((a, b) => b.p.charge - a.p.charge);
+
+  document.getElementById('flagged-count').textContent = `(${rows.length})`;
+  const tbody = document.querySelector('#flagged-table tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">אין עסקאות חריגות</td></tr>`; return; }
+  const total = rows.reduce((s, x) => s + x.p.charge, 0);
+  tbody.innerHTML = rows.map(({ p, reasons }) => `
+    <tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
+      <td class="num">${esc(p.date)}</td>
+      <td>${esc(p.merchant)}</td>
+      <td>${typeBadge(p.type)}</td>
+      <td>${esc(p.category || '—')}</td>
+      <td class="num ${amountClass(p)}">${fmt(p.charge)}</td>
+      <td class="reason">${esc(reasons.join(' · '))}</td>
+    </tr>
+  `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">${fmt(total)}</td><td></td></tr>`;
+}
+
+function renderDuplicates() {
+  const rows = DATA.insights.duplicates;
+  document.getElementById('duplicates-count').textContent = `(${rows.length})`;
+  const tbody = document.querySelector('#duplicates-table tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="6" class="empty">לא נמצאו חיובים כפולים חשודים</td></tr>`; return; }
+  const total = rows.reduce((s, d) => s + d.total, 0);
+  tbody.innerHTML = rows.map(d => `
+    <tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${d.total}" data-label="${esc(d.date + ' · ' + d.merchant + ' (×' + d.count + ')')}"></td>
+      <td class="num">${esc(d.date)}</td>
+      <td>${esc(d.merchant)}</td>
+      <td class="num">${fmt(d.amount)}</td>
+      <td class="num">${d.count}</td>
+      <td class="num amount-high">${fmt(d.total)}</td>
+    </tr>
+  `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">${fmt(total)}</td></tr>`;
+}
+
+function renderSubscriptions() {
+  const rows = DATA.insights.subscriptions;
+  document.getElementById('subscriptions-count').textContent = `(${rows.length})`;
+  const tbody = document.querySelector('#subscriptions-table tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="5" class="empty">לא זוהו הוראות קבע</td></tr>`; return; }
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  tbody.innerHTML = rows.map(s => `
+    <tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${s.total}" data-label="${esc('הו&quot;ק · ' + s.merchant)}"></td>
+      <td>${esc(s.merchant)}</td>
+      <td class="num">${s.count}</td>
+      <td class="num">${s.amounts.map(a => fmt(a)).join(', ')}</td>
+      <td class="num">${fmt(s.total)}</td>
+    </tr>
+  `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${rows.reduce((s,r) => s+r.count, 0)}</td><td></td><td class="num">${fmt(total)}</td></tr>`;
+}
+
+function renderInstallments() {
+  const rows = DATA.insights.installments;
+  const total = DATA.insights.total_installment_remaining;
+  document.getElementById('installments-count').textContent = `(${rows.length})`;
+  document.getElementById('installments-remaining').textContent = `יתרה עתידית כוללת: ₪${fmt(total)}`;
+  const tbody = document.querySelector('#installments-table tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">אין תשלומים פתוחים</td></tr>`; return; }
+  const totalCharge = rows.reduce((s, i) => s + i.charge, 0);
+  const totalRemaining = rows.reduce((s, i) => s + i.remaining_amount, 0);
+  tbody.innerHTML = rows.map(i => `
+    <tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${i.charge}" data-label="${esc(i.date + ' · ' + i.merchant + (i.total ? ' (' + i.current + '/' + i.total + ')' : ''))}"></td>
+      <td class="num">${esc(i.date)}</td>
+      <td>${esc(i.merchant)}</td>
+      <td class="num">${fmt(i.charge)}</td>
+      <td class="num">${i.current || '—'}${i.total ? ' / ' + i.total : ''}</td>
+      <td class="num">${i.remaining_count || 0}</td>
+      <td class="num ${i.remaining_amount > 0 ? 'amount-high' : ''}">${fmt(i.remaining_amount)}</td>
+    </tr>
+  `).join('') + `<tr class="sum-row"><td></td><td colspan="2">סה"כ</td><td class="num">${fmt(totalCharge)}</td><td></td><td></td><td class="num">${fmt(totalRemaining)}</td></tr>`;
+}
+
+function renderMerchants() {
+  const rows = DATA.insights.top_merchants;
+  document.getElementById('merchants-count').textContent = `(${rows.length})`;
+  const tbody = document.querySelector('#merchants-table tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="5" class="empty">—</td></tr>`; return; }
+  const totalCount = rows.reduce((s, m) => s + m.count, 0);
+  const totalAmount = rows.reduce((s, m) => s + m.total, 0);
+  tbody.innerHTML = rows.map(m => `
+    <tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${m.total}" data-label="${esc(m.name + ' (' + m.count + ' עסקאות)')}"></td>
+      <td>${esc(m.name)}${m.aliases.length > 1 ? `<div class="aliases">${esc(m.aliases.join(' · '))}</div>` : ''}</td>
+      <td class="num">${m.count}</td>
+      <td class="num">${fmt(m.total)}</td>
+      <td class="num">${fmt(m.total / m.count)}</td>
+    </tr>
+  `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${totalCount}</td><td class="num">${fmt(totalAmount)}</td><td></td></tr>`;
+}
+
+let sortKey = 'date';
+let sortDir = -1;
+
+function renderAll() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const tf = document.getElementById('type-filter').value;
+  const cf = document.getElementById('category-filter').value;
+
+  let rows = DATA.payments.filter(p => {
+    if (q && !(p.merchant.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q))) return false;
+    if (tf && p.type !== tf) return false;
+    if (cf && (p.category || '') !== cf) return false;
+    return true;
+  });
+
+  rows.sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === '' || av == null) return 1;
+    if (bv === '' || bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sortDir;
+    return String(av).localeCompare(String(bv), 'he') * sortDir;
+  });
+
+  const total = rows.reduce((s, p) => s + p.charge, 0);
+  document.getElementById('all-count').textContent = `(${rows.length})`;
+  document.querySelector('#all-table tbody').innerHTML = rows.map(p => `
+    <tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
+      <td class="num">${esc(p.date)}</td>
+      <td>${esc(p.merchant)}</td>
+      <td>${typeBadge(p.type)}</td>
+      <td>${esc(p.category || '—')}</td>
+      <td class="num ${amountClass(p)}">${fmt(p.charge)}</td>
+      <td>${esc(p.notes || '')}</td>
+    </tr>
+  `).join('') + (rows.length ? `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">${fmt(total)}</td><td></td></tr>` : '');
+  const sa = document.querySelector('#all-table .select-all');
+  if (sa) sa.checked = false;
+  updateFloatingBar();
+}
+
+// -------------------- Smart Insights --------------------
+
+function renderInsights() {
+  const payments = DATA.payments;
+  const ins = DATA.insights;
+  const sum = DATA.summary;
+  const items = [];
+
+  // ── Category dominance ──────────────────────────────────────────────────
+  if (ins.categories.length) {
+    const top = ins.categories[0];
+    const pct = Math.round(top.total / sum.total_amount * 100);
+    items.push({
+      ic: '🏆', level: pct > 50 ? 'warn' : 'ok',
+      html: `הקטגוריה הגדולה ביותר היא <strong>${esc(top.name)}</strong> — ₪${fmt(top.total)} (${pct}% מסה"כ)`,
+    });
+    if (ins.categories.length >= 2) {
+      const second = ins.categories[1];
+      const pct2 = Math.round(second.total / sum.total_amount * 100);
+      items.push({
+        ic: '🥈', level: 'ok',
+        html: `קטגוריה שנייה: <strong>${esc(second.name)}</strong> — ₪${fmt(second.total)} (${pct2}%)`,
+      });
+    }
+  }
+
+  // ── Subscription burden ─────────────────────────────────────────────────
+  if (ins.subscriptions.length) {
+    const subTotal = ins.subscriptions.reduce((s, r) => s + r.total, 0);
+    const subPct = Math.round(subTotal / sum.total_amount * 100);
+    items.push({
+      ic: '🔄', level: subPct > 25 ? 'warn' : 'ok',
+      html: `${ins.subscriptions.length} הוראות קבע בסה"כ <strong>₪${fmt(subTotal)}</strong> — ${subPct}% מסך ההוצאות`,
+    });
+    // Most expensive subscription
+    const topSub = ins.subscriptions[0];
+    items.push({
+      ic: '💳', level: 'ok',
+      html: `הוראת הקבע הגדולה ביותר: <strong>${esc(topSub.merchant)}</strong> — ₪${fmt(topSub.total)}`,
+    });
+  }
+
+  // ── Future installment debt ─────────────────────────────────────────────
+  if (ins.total_installment_remaining > 0) {
+    const biggest = [...ins.installments].sort((a, b) => b.remaining_amount - a.remaining_amount)[0];
+    items.push({
+      ic: '📅', level: ins.total_installment_remaining > 3000 ? 'warn' : 'ok',
+      html: `יתרת תשלומים עתידיים: <strong>₪${fmt(ins.total_installment_remaining)}</strong> (${ins.installments.length} תוכניות) | הגדולה: <strong>${esc(biggest.merchant)}</strong>`,
+    });
+  }
+
+  // ── Duplicate charges alert ─────────────────────────────────────────────
+  if (ins.duplicates.length) {
+    const dupTotal = ins.duplicates.reduce((s, d) => s + d.total, 0);
+    items.push({
+      ic: '⚠️', level: 'alert',
+      html: `<strong>${ins.duplicates.length} חיובים כפולים חשודים</strong> בסה"כ ₪${fmt(dupTotal)} — מומלץ לבדוק`,
+    });
+  }
+
+  // ── Top merchant by spend ───────────────────────────────────────────────
+  if (ins.top_merchants.length) {
+    const top = ins.top_merchants[0];
+    const pct = Math.round(top.total / sum.total_amount * 100);
+    items.push({
+      ic: '🏪', level: 'ok',
+      html: `בית העסק עם ההוצאה הגבוהה ביותר: <strong>${esc(top.name)}</strong> — ₪${fmt(top.total)} (${pct}%, ${top.count} עסקאות)`,
+    });
+  }
+
+  // ── Most frequent merchant ─────────────────────────────────────────────
+  const byCount = [...ins.top_merchants].sort((a, b) => b.count - a.count);
+  if (byCount.length && byCount[0] !== ins.top_merchants[0] && byCount[0].count >= 3) {
+    const top = byCount[0];
+    items.push({
+      ic: '🔁', level: 'ok',
+      html: `הכי הרבה ביקורים: <strong>${esc(top.name)}</strong> — ${top.count} עסקאות (ממוצע ₪${fmt(top.total / top.count)} לביקור)`,
+    });
+  }
+
+  // ── Average transaction size ────────────────────────────────────────────
+  if (sum.total_count > 0) {
+    const avg = sum.total_amount / sum.total_count;
+    items.push({
+      ic: '📊', level: 'ok',
+      html: `<strong>${sum.total_count}</strong> עסקאות בסה"כ · ממוצע לעסקה: <strong>₪${fmt(avg)}</strong>`,
+    });
+  }
+
+  // ── Daily spend + peak day ──────────────────────────────────────────────
+  if (ins.daily_trend.length) {
+    const avgDaily = sum.total_amount / ins.daily_trend.length;
+    const peak = ins.daily_trend.reduce((a, b) => b.total > a.total ? b : a);
+    items.push({
+      ic: '📈', level: 'ok',
+      html: `ממוצע יומי: <strong>₪${fmt(avgDaily)}</strong> · יום שיא: <strong>${peak.date}</strong> (₪${fmt(peak.total)})`,
+    });
+  }
+
+  // ── Day-of-week pattern ─────────────────────────────────────────────────
+  const dowTotals = [0,0,0,0,0,0,0];
+  const dowCounts = [0,0,0,0,0,0,0];
+  const dowNames  = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+  for (const p of payments) {
+    if (!p.date) continue;
+    const d = new Date(p.date).getDay();
+    dowTotals[d] += p.charge;
+    dowCounts[d]++;
+  }
+  const topDow = dowTotals.indexOf(Math.max(...dowTotals));
+  if (dowCounts[topDow] > 0) {
+    items.push({
+      ic: '🗓️', level: 'ok',
+      html: `יום ההוצאה המרוכז ביותר: <strong>יום ${dowNames[topDow]}</strong> — ₪${fmt(dowTotals[topDow])} ב-${dowCounts[topDow]} עסקאות`,
+    });
+  }
+
+  // ── Largest single transaction ──────────────────────────────────────────
+  const positivePayments = payments.filter(p => p.charge > 0);
+  if (positivePayments.length) {
+    const biggest = positivePayments.reduce((a, b) => b.charge > a.charge ? b : a);
+    items.push({
+      ic: '💸', level: biggest.charge >= DATA.high_threshold * 3 ? 'warn' : 'ok',
+      html: `עסקה גדולה ביותר: <strong>${esc(biggest.merchant)}</strong> — ₪${fmt(biggest.charge)} (${biggest.date})`,
+    });
+  }
+
+  // ── High-value transaction count ────────────────────────────────────────
+  const highCount = payments.filter(p => p.charge >= DATA.high_threshold).length;
+  if (highCount > 0) {
+    const highTotal = payments.filter(p => p.charge >= DATA.high_threshold).reduce((s, p) => s + p.charge, 0);
+    const highPct = Math.round(highTotal / sum.total_amount * 100);
+    items.push({
+      ic: '🔺', level: highPct > 40 ? 'warn' : 'ok',
+      html: `<strong>${highCount}</strong> עסקאות מעל ₪${DATA.high_threshold} — סה"כ ₪${fmt(highTotal)} (${highPct}% מהסכום הכולל)`,
+    });
+  }
+
+  // ── Foreign currency ───────────────────────────────────────────────────
+  const foreign = payments.filter(p => p.category && p.category.includes('חו"ל'));
+  if (foreign.length) {
+    const foreignTotal = foreign.reduce((s, p) => s + p.charge, 0);
+    const foreignPct = Math.round(foreignTotal / sum.total_amount * 100);
+    items.push({
+      ic: '🌍', level: foreignPct > 20 ? 'warn' : 'ok',
+      html: `<strong>${foreign.length}</strong> עסקאות בחו"ל — ₪${fmt(foreignTotal)} (${foreignPct}% מסה"כ)`,
+    });
+  }
+
+  // ── Refunds ────────────────────────────────────────────────────────────
+  const refunds = payments.filter(p => p.charge < 0);
+  if (refunds.length) {
+    const refundTotal = Math.abs(refunds.reduce((s, p) => s + p.charge, 0));
+    items.push({
+      ic: '↩️', level: 'ok',
+      html: `<strong>${refunds.length}</strong> זיכויים בסה"כ <strong>₪${fmt(refundTotal)}</strong> הוחזרו לחשבון`,
+    });
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────
+  const grid = document.getElementById('insights-grid');
+  if (!items.length) {
+    grid.innerHTML = `<div class="empty">אין תובנות זמינות.</div>`;
+    return;
+  }
+  grid.innerHTML = items.map(item => `
+    <div class="insight-card ${item.level}">
+      <span class="ic">${item.ic}</span>
+      <span class="body">${item.html}</span>
+    </div>
+  `).join('');
+}
+
+function initFilters() {
+  const types = [...new Set(DATA.payments.map(p => p.type).filter(Boolean))].sort();
+  const cats = [...new Set(DATA.payments.map(p => p.category).filter(Boolean))].sort();
+  document.getElementById('type-filter').insertAdjacentHTML('beforeend', types.map(t => `<option>${esc(t)}</option>`).join(''));
+  document.getElementById('category-filter').insertAdjacentHTML('beforeend', cats.map(c => `<option>${esc(c)}</option>`).join(''));
+}
+
+// Collapsible sections
+document.querySelectorAll('.section > h2').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+});
+
+document.querySelectorAll('#all-table th[data-k]').forEach(th => {
+  th.addEventListener('click', () => {
+    const k = th.dataset.k;
+    if (sortKey === k) { sortDir = -sortDir; } else { sortKey = k; sortDir = 1; }
+    renderAll();
+  });
+});
+
+['search', 'type-filter', 'category-filter'].forEach(id =>
+  document.getElementById(id).addEventListener('input', renderAll));
+
+// -------------------- Selection / floating bar --------------------
+
+function updateFloatingBar() {
+  const checked = [...document.querySelectorAll('.row-chk:checked')];
+  const bar = document.getElementById('floating-bar');
+  if (!checked.length) { bar.classList.remove('visible'); return; }
+  const total = checked.reduce((s, cb) => s + parseFloat(cb.dataset.amount || 0), 0);
+  document.getElementById('sel-summary').textContent = `נבחרו ${checked.length} פריטים`;
+  document.getElementById('sel-total').textContent = `סה"כ ₪${fmt(total)}`;
+  document.getElementById('sel-items').innerHTML = checked.map(cb => {
+    const amount = parseFloat(cb.dataset.amount || 0);
+    const label = cb.dataset.label || '—';
+    const cls = amount < 0 ? 'amount-refund' : amount >= DATA.high_threshold ? 'amount-high' : '';
+    return `<div class="sel-item">
+      <span class="item-label">${label}</span>
+      <span class="item-amount ${cls}">₪${fmt(amount)}</span>
+    </div>`;
+  }).join('');
+  bar.classList.add('visible');
+}
+
+// -------------------- Save HTML --------------------
+
+function saveHTML() {
+  const html = '<!DOCTYPE html>' + document.documentElement.outerHTML;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (DATA.source || DATA.title || 'payments').replace(/\.[^.]+$/, '') + '.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+document.getElementById('btn-save-html').addEventListener('click', saveHTML);
+
+// -------------------- Save JSON --------------------
+
+function saveJSON() {
+  const payload = {
+    title: DATA.title,
+    source: DATA.source,
+    issuer: DATA.issuer,
+    payments: DATA.payments,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (DATA.source || DATA.title || 'payments').replace(/\.[^.]+$/, '') + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+document.getElementById('btn-save').addEventListener('click', saveJSON);
+
+document.addEventListener('change', e => {
+  if (e.target.classList.contains('row-chk')) {
+    const tbody = e.target.closest('tbody');
+    const table = tbody.closest('table');
+    const selectAll = table.querySelector('.select-all');
+    if (selectAll) {
+      const all = tbody.querySelectorAll('.row-chk');
+      selectAll.checked = [...all].every(cb => cb.checked);
+    }
+    updateFloatingBar();
+  }
+  if (e.target.classList.contains('select-all')) {
+    const table = e.target.closest('table');
+    table.querySelectorAll('tbody .row-chk').forEach(cb => { cb.checked = e.target.checked; });
+    updateFloatingBar();
+  }
+});
+
+document.getElementById('sel-clear').addEventListener('click', () => {
+  document.querySelectorAll('.row-chk:checked').forEach(cb => { cb.checked = false; });
+  document.querySelectorAll('.select-all').forEach(cb => { cb.checked = false; });
+  updateFloatingBar();
+});
+
+initTheme();
+initFilters();
+renderCards();
+renderInsights();
+renderFlagged();
+renderDuplicates();
+renderSubscriptions();
+renderInstallments();
+renderMerchants();
+renderAll();
+renderCharts();
+</script>
+</body>
+</html>
+"""
+
+
+def generate_html(data: dict) -> str:
+    payload = {
+        **data,
+        "summary": build_summary(data["payments"]),
+        "insights": build_insights(data["payments"]),
+        "high_threshold": HIGH_THRESHOLD,
+    }
+    return HTML_TEMPLATE \
+        .replace("__TITLE__", payload["title"]) \
+        .replace("__DATA__", json.dumps(payload, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
+# Two-month comparison
+# ---------------------------------------------------------------------------
+
+
+def build_comparison(data_a: dict, data_b: dict) -> dict:
+    """Build a diff between two parsed payments files."""
+    def by_category(payments):
+        d = defaultdict(float)
+        for p in payments:
+            d[p["category"] or "ללא קטגוריה"] += p["charge"]
+        return d
+
+    def by_merchant(payments):
+        d = defaultdict(float)
+        for p in payments:
+            d[p.get("canonical") or p["merchant"]] += p["charge"]
+        return d
+
+    cat_a, cat_b = by_category(data_a["payments"]), by_category(data_b["payments"])
+    mer_a, mer_b = by_merchant(data_a["payments"]), by_merchant(data_b["payments"])
+
+    categories = sorted(
+        [
+            {
+                "name": c,
+                "a": round(cat_a.get(c, 0), 2),
+                "b": round(cat_b.get(c, 0), 2),
+                "delta": round(cat_b.get(c, 0) - cat_a.get(c, 0), 2),
+            }
+            for c in set(cat_a) | set(cat_b)
+        ],
+        key=lambda x: abs(x["delta"]),
+        reverse=True,
+    )
+
+    merchants = sorted(
+        [
+            {
+                "name": m,
+                "a": round(mer_a.get(m, 0), 2),
+                "b": round(mer_b.get(m, 0), 2),
+                "delta": round(mer_b.get(m, 0) - mer_a.get(m, 0), 2),
+            }
+            for m in set(mer_a) | set(mer_b)
+        ],
+        key=lambda x: abs(x["delta"]),
+        reverse=True,
+    )
+
+    new_merchants = sorted(
+        [m for m in merchants if m["a"] == 0 and m["b"] > 0],
+        key=lambda x: -x["b"],
+    )
+    vanished = sorted(
+        [m for m in merchants if m["b"] == 0 and m["a"] > 0],
+        key=lambda x: -x["a"],
+    )
+
+    tot_a = sum(p["charge"] for p in data_a["payments"])
+    tot_b = sum(p["charge"] for p in data_b["payments"])
+
+    return {
+        "a_title": data_a["title"],
+        "a_source": data_a["source"],
+        "a_total": round(tot_a, 2),
+        "a_count": len(data_a["payments"]),
+        "b_title": data_b["title"],
+        "b_source": data_b["source"],
+        "b_total": round(tot_b, 2),
+        "b_count": len(data_b["payments"]),
+        "delta": round(tot_b - tot_a, 2),
+        "delta_pct": round((tot_b - tot_a) / tot_a * 100, 1) if tot_a else 0,
+        "categories": categories,
+        "merchants": merchants,
+        "new_merchants": new_merchants[:20],
+        "vanished": vanished[:20],
+    }
+
+
+COMPARE_HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>השוואת תקופות</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --text: #222; --muted: #666; --soft: #888;
+    --border: #eee; --border-strong: #ddd; --hover: #f8f8fb; --th-bg: #fafafa;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --up: #c62828; --down: #2e7d32; --a-color: #2196f3; --b-color: #ef6c00;
+  }
+  [data-theme="dark"] {
+    --bg: #111418; --card: #1c2128; --text: #e6edf3; --muted: #9aa4af; --soft: #7a8591;
+    --border: #2a323c; --border-strong: #394350; --hover: #232b36; --th-bg: #1a2028;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --up: #ef5350; --down: #66bb6a; --a-color: #64b5f6; --b-color: #ffb74d;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; padding: 24px;
+         background: var(--bg); color: var(--text); transition: background 0.2s, color 0.2s; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+  header h1 { font-size: 20px; margin: 0 0 6px; }
+  .src { color: var(--soft); font-size: 12px; }
+  .theme-toggle { background: var(--card); color: var(--text); border: 1px solid var(--border-strong);
+                  width: 40px; height: 40px; border-radius: 10px; cursor: pointer; font-size: 18px; box-shadow: var(--shadow); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); padding: 16px; border-radius: 10px; box-shadow: var(--shadow); }
+  .card .label { font-size: 11px; color: var(--muted); letter-spacing: 0.5px; }
+  .card .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .card .sub { font-size: 12px; color: var(--soft); margin-top: 2px; }
+  .section { background: var(--card); padding: 16px 20px; border-radius: 10px; box-shadow: var(--shadow); margin-bottom: 20px; }
+  .section > h2 { margin: 0 0 12px; font-size: 16px; }
+  .chart-wrap { position: relative; height: 320px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; }
+  th { background: var(--th-bg); font-weight: 600; font-size: 13px; }
+  tr:hover td { background: var(--hover); }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .up { color: var(--up); font-weight: 600; }
+  .down { color: var(--down); font-weight: 600; }
+  .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid-two { grid-template-columns: 1fr; } }
+  .empty { color: var(--soft); font-style: italic; padding: 8px 0; }
+  .backlink { font-size: 12px; color: var(--muted); text-decoration: none; }
+  .backlink:hover { color: var(--a-color); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>השוואת תקופות</h1>
+    <div class="src"><a class="backlink" href="/">← חזרה להעלאת קובץ</a></div>
+  </div>
+  <button class="theme-toggle" id="theme-toggle" title="מצב כהה/בהיר">🌙</button>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<div class="section">
+  <h2>חלוקה לפי ענף</h2>
+  <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>שינויים לפי ענף</h2>
+  <table id="categories-table">
+    <thead><tr><th>ענף</th><th>חודש א' (₪)</th><th>חודש ב' (₪)</th><th>שינוי (₪)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="section">
+  <h2>השינויים הגדולים ביותר לפי בית עסק</h2>
+  <div class="grid-two">
+    <div>
+      <h3 style="font-size:13px;color:var(--muted);margin:0 0 8px;">עליות</h3>
+      <table id="increases-table">
+        <thead><tr><th>בית עסק</th><th>לפני</th><th>אחרי</th><th>+שינוי</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="font-size:13px;color:var(--muted);margin:0 0 8px;">ירידות</h3>
+      <table id="decreases-table">
+        <thead><tr><th>בית עסק</th><th>לפני</th><th>אחרי</th><th>-שינוי</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="grid-two">
+    <div>
+      <h2>חדשים בחודש ב' <span class="num" id="new-count" style="color:var(--soft);font-size:12px;"></span></h2>
+      <table id="new-table">
+        <thead><tr><th>בית עסק</th><th>סכום (₪)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h2>הפסיקו בחודש ב' <span class="num" id="vanished-count" style="color:var(--soft);font-size:12px;"></span></h2>
+      <table id="vanished-table">
+        <thead><tr><th>בית עסק</th><th>סכום קודם (₪)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = __DATA__;
+
+const fmt = n => new Intl.NumberFormat('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+const fmt0 = n => new Intl.NumberFormat('he-IL', { maximumFractionDigits: 0 }).format(n);
+const signed = n => (n >= 0 ? '+' : '') + fmt(n);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const deltaClass = n => n > 0.01 ? 'up' : n < -0.01 ? 'down' : '';
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.getElementById('theme-toggle').textContent = t === 'dark' ? '☀️' : '🌙';
+  renderChart();
+}
+function initTheme() {
+  const saved = localStorage.getItem('payments-theme') ||
+    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  applyTheme(saved);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('payments-theme', next);
+    applyTheme(next);
+  });
+}
+
+function renderCards() {
+  const deltaCls = deltaClass(DATA.delta);
+  const cards = [
+    ['חודש א\'', '₪' + fmt(DATA.a_total), DATA.a_count + ' עסקאות · ' + DATA.a_source],
+    ['חודש ב\'', '₪' + fmt(DATA.b_total), DATA.b_count + ' עסקאות · ' + DATA.b_source],
+    ['שינוי', `<span class="${deltaCls}">${signed(DATA.delta)}</span>`, (DATA.delta_pct >= 0 ? '+' : '') + DATA.delta_pct + '%'],
+  ];
+  document.getElementById('cards').innerHTML = cards
+    .map(([l, v, sub]) => `<div class="card"><div class="label">${esc(l)}</div><div class="value">${v}</div><div class="sub">${esc(sub)}</div></div>`)
+    .join('');
+}
+
+let chart;
+function renderChart() {
+  if (typeof Chart === 'undefined') return;
+  if (chart) chart.destroy();
+  const text = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#222';
+  const grid = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#eee';
+  const aColor = getComputedStyle(document.documentElement).getPropertyValue('--a-color').trim() || '#2196f3';
+  const bColor = getComputedStyle(document.documentElement).getPropertyValue('--b-color').trim() || '#ef6c00';
+  Chart.defaults.color = text;
+  Chart.defaults.borderColor = grid;
+
+  const cats = DATA.categories.slice(0, 12);
+  chart = new Chart(document.getElementById('chart-categories'), {
+    type: 'bar',
+    data: {
+      labels: cats.map(c => c.name),
+      datasets: [
+        { label: 'חודש א\'', data: cats.map(c => c.a), backgroundColor: aColor },
+        { label: 'חודש ב\'', data: cats.map(c => c.b), backgroundColor: bColor },
+      ],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: { x: { ticks: { callback: v => '₪' + fmt0(v) } } },
+    },
+  });
+}
+
+function renderCategoriesTable() {
+  document.querySelector('#categories-table tbody').innerHTML = DATA.categories.map(c => `
+    <tr>
+      <td>${esc(c.name)}</td>
+      <td class="num">${fmt(c.a)}</td>
+      <td class="num">${fmt(c.b)}</td>
+      <td class="num ${deltaClass(c.delta)}">${signed(c.delta)}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="4" class="empty">אין נתונים</td></tr>`;
+}
+
+function renderChanges() {
+  const increases = DATA.merchants.filter(m => m.delta > 0.01).slice(0, 15);
+  const decreases = [...DATA.merchants].filter(m => m.delta < -0.01).sort((a, b) => a.delta - b.delta).slice(0, 15);
+
+  document.querySelector('#increases-table tbody').innerHTML = increases.map(m => `
+    <tr>
+      <td>${esc(m.name)}</td>
+      <td class="num">${fmt(m.a)}</td>
+      <td class="num">${fmt(m.b)}</td>
+      <td class="num up">${signed(m.delta)}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="4" class="empty">—</td></tr>`;
+
+  document.querySelector('#decreases-table tbody').innerHTML = decreases.map(m => `
+    <tr>
+      <td>${esc(m.name)}</td>
+      <td class="num">${fmt(m.a)}</td>
+      <td class="num">${fmt(m.b)}</td>
+      <td class="num down">${signed(m.delta)}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="4" class="empty">—</td></tr>`;
+}
+
+function renderNewVanished() {
+  document.getElementById('new-count').textContent = `(${DATA.new_merchants.length})`;
+  document.getElementById('vanished-count').textContent = `(${DATA.vanished.length})`;
+  document.querySelector('#new-table tbody').innerHTML = DATA.new_merchants.map(m => `
+    <tr><td>${esc(m.name)}</td><td class="num">${fmt(m.b)}</td></tr>
+  `).join('') || `<tr><td colspan="2" class="empty">—</td></tr>`;
+  document.querySelector('#vanished-table tbody').innerHTML = DATA.vanished.map(m => `
+    <tr><td>${esc(m.name)}</td><td class="num">${fmt(m.a)}</td></tr>
+  `).join('') || `<tr><td colspan="2" class="empty">—</td></tr>`;
+}
+
+initTheme();
+renderCards();
+renderCategoriesTable();
+renderChanges();
+renderNewVanished();
+renderChart();
+</script>
+</body>
+</html>
+"""
+
+
+def generate_comparison_html(data_a: dict, data_b: dict) -> str:
+    comparison = build_comparison(data_a, data_b)
+    return COMPARE_HTML_TEMPLATE.replace("__DATA__", json.dumps(comparison, ensure_ascii=False))
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 1
+
+    xlsx_path = Path(sys.argv[1])
+    if not xlsx_path.exists():
+        print(f"error: file not found: {xlsx_path}", file=sys.stderr)
+        return 1
+
+    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else xlsx_path.with_suffix(".html")
+
+    data = parse_payments(xlsx_path)
+    out_path.write_text(generate_html(data), encoding="utf-8")
+
+    s = build_summary(data["payments"])
+    ins = build_insights(data["payments"])
+    print(f"parsed {s['total_count']} payments  ·  total ₪{s['total_amount']:,.2f}")
+    print(f"  regular      : {s['regular_count']:3d}  ₪{s['regular_amount']:,.2f}")
+    print(f"  non-regular  : {s['non_regular_count']:3d}  ₪{s['non_regular_amount']:,.2f}")
+    print(f"  high (≥{HIGH_THRESHOLD})  : {s['high_count']:3d}  ₪{s['high_amount']:,.2f}")
+    print(f"  duplicates   : {len(ins['duplicates'])}")
+    print(f"  subscriptions: {len(ins['subscriptions'])}")
+    print(f"  installments : {len(ins['installments'])}  (future ₪{ins['total_installment_remaining']:,.2f})")
+    print(f"written: {out_path}")
+
+    if "--open" in sys.argv:
+        webbrowser.open(out_path.resolve().as_uri())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
