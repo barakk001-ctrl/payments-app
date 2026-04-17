@@ -240,8 +240,7 @@ def _parse_upload(f) -> dict:
         tmp_path = Path(tmp.name)
     try:
         data = parse_payments(tmp_path)
-        if data["title"] == tmp_path.stem:
-            data["title"] = Path(f.filename).stem
+        data["title"] = Path(f.filename).stem.replace("_", " ")
         data["source"] = f.filename
         return data
     finally:
