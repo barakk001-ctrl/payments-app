@@ -1878,19 +1878,22 @@ const esc  = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','
 
 const COLORS = ['#2196f3','#ef6c00','#43a047','#8e24aa','#e53935','#00acc1','#fb8c00','#6d4c41','#546e7a','#d81b60','#7cb342','#3949ab'];
 
+let charts = {};
+function destroyCharts(){Object.values(charts).forEach(c=>c&&c.destroy());charts={};}
+
 function applyTheme(t){
   document.documentElement.dataset.theme=t;
   document.getElementById('theme-toggle').textContent=t==='dark'?'☀️':'🌙';
   renderCharts();
 }
-(function initTheme(){
+function initTheme(){
   const saved=localStorage.getItem('payments-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
   applyTheme(saved);
   document.getElementById('theme-toggle').addEventListener('click',()=>{
     const next=document.documentElement.dataset.theme==='dark'?'light':'dark';
     localStorage.setItem('payments-theme',next); applyTheme(next);
   });
-})();
+}
 
 // ── Cards ──────────────────────────────────────────────────────────────────
 function renderCards(){
@@ -1907,9 +1910,6 @@ function renderCards(){
 }
 
 // ── Charts ─────────────────────────────────────────────────────────────────
-let charts={};
-function destroyCharts(){Object.values(charts).forEach(c=>c&&c.destroy());charts={};}
-
 function renderCharts(){
   if(typeof Chart==='undefined') return;
   destroyCharts();
@@ -2043,11 +2043,11 @@ document.querySelectorAll('.section>h2').forEach(h=>{
   h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
 });
 
+initTheme();
 renderCards();
 renderInsights();
 renderCatTable();
 renderMerTable();
-renderCharts();
 </script>
 </body>
 </html>
