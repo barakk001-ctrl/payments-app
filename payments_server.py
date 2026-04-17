@@ -248,6 +248,20 @@ def _parse_upload(f) -> dict:
         tmp_path.unlink(missing_ok=True)
 
 
+@app.get("/health")
+def health():
+    import importlib
+    pkgs = ["flask", "openpyxl", "pdfplumber", "pdfminer"]
+    status = {}
+    for pkg in pkgs:
+        try:
+            m = importlib.import_module(pkg.replace(".", "_").split("_")[0])
+            status[pkg] = getattr(m, "__version__", "ok")
+        except ImportError as e:
+            status[pkg] = f"MISSING: {e}"
+    return status
+
+
 @app.get("/")
 def index():
     return render_form()
