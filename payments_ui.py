@@ -2017,52 +2017,146 @@ function renderMerTable(q=''){
 // ── Insights ────────────────────────────────────────────────────────────────
 function renderInsights(){
   const months=DATA.months; const cats=DATA.cat_matrix; const mers=DATA.mer_matrix;
+  const n=months.length;
   const items=[];
+  if(n<2) return;
 
-  // Overview
-  items.push({l:'ok',e:'📅',
-    h:`<strong>${months.length} חודשים</strong> בסה"כ · ממוצע חודשי <strong>₪${fmt(DATA.avg_monthly)}</strong>`});
+  const totals=months.map(m=>m.total);
+  const avg=DATA.avg_monthly;
 
-  // Trend: last vs prev month
-  if(months.length>=2){
-    const last=months[months.length-1], prev=months[months.length-2];
-    const d=last.total-prev.total, pct=Math.abs(Math.round(d/prev.total*100));
-    items.push({l:d>prev.total*.15?'warn':'ok',e:d>=0?'⬆️':'⬇️',
-      h:`${esc(last.label)} לעומת ${esc(prev.label)}: <strong>${d>=0?'+':''}₪${fmt(d)}</strong> (${d>=0?'+':''}${pct}%)`});
-  }
+  // ── 1. Annual projection ────────────────────────────────────────────────
+  const annualProjection=Math.round(avg*12);
+  items.push({l:'ok',e:'🗓️',
+    h:`קצב שנתי משוער: <strong>₪${fmt(annualProjection)}</strong> (ממוצע ₪${fmt(avg)}/חודש על בסיס ${n} חודשים)`});
 
-  // Peak & low
-  items.push({l:'ok',e:'📈',
-    h:`חודש יקר: <strong>${esc(DATA.peak_label)}</strong> — ₪${fmt(DATA.peak_total)} | חודש זול: <strong>${esc(DATA.low_label)}</strong> — ₪${fmt(DATA.low_total)}`});
-
-  // Fastest growing merchant
-  const rising=DATA.mer_matrix.filter(m=>m.last_delta>0).sort((a,b)=>b.last_delta-a.last_delta)[0];
-  if(rising) items.push({l:'warn',e:'🔺',
-    h:`בית עסק עם עלייה הגדולה ביותר: <strong>${esc(rising.name)}</strong> — +₪${fmt(rising.last_delta)} בחודש האחרון`});
-
-  // Fastest shrinking merchant
-  const shrinking=DATA.mer_matrix.filter(m=>m.last_delta<0).sort((a,b)=>a.last_delta-b.last_delta)[0];
-  if(shrinking) items.push({l:'ok',e:'📉',
-    h:`בית עסק עם ירידה הגדולה ביותר: <strong>${esc(shrinking.name)}</strong> — ${fmt(shrinking.last_delta)}₪ בחודש האחרון`});
-
-  // Top category
-  if(cats.length) items.push({l:'ok',e:'🏆',
-    h:`קטגוריה מובילה: <strong>${esc(cats[0].name)}</strong> — ₪${fmt(cats[0].grand)} סה"כ`});
-
-  // Top merchant
-  if(mers.length) items.push({l:'ok',e:'🏪',
-    h:`בית עסק מוביל: <strong>${esc(mers[0].name)}</strong> — ₪${fmt(mers[0].grand)} סה"כ`});
-
-  // Biggest single-month swing in any category
-  let maxSwing=0,swingCat='',swingDir='';
-  for(const c of cats){
-    for(let i=1;i<c.totals.length;i++){
-      const sw=Math.abs(c.totals[i]-c.totals[i-1]);
-      if(sw>maxSwing){maxSwing=sw;swingCat=c.name;swingDir=c.totals[i]>c.totals[i-1]?'עלייה':'ירידה';}
+  // ── 2. Spending trend (linear regression slope) ─────────────────────────
+  if(n>=3){
+    const xs=months.map((_,i)=>i), meanX=(n-1)/2, meanY=avg;
+    const num=xs.reduce((s,x,i)=>s+(x-meanX)*(totals[i]-meanY),0);
+    const den=xs.reduce((s,x)=>s+(x-meanX)**2,0);
+    const slope=den?num/den:0;
+    const pctPerMonth=Math.abs(Math.round(slope/avg*100));
+    if(Math.abs(slope)>avg*0.02){
+      items.push({l:slope>0?'warn':'ok',e:slope>0?'📈':'📉',
+        h:slope>0
+          ? `מגמת <strong>עלייה</strong> ב-${pctPerMonth}% לחודש לאורך התקופה — ₪${fmt0(Math.abs(slope))} יותר בכל חודש בממוצע`
+          : `מגמת <strong>ירידה</strong> ב-${pctPerMonth}% לחודש לאורך התקופה — ₪${fmt0(Math.abs(slope))} פחות בכל חודש בממוצע`});
+    } else {
+      items.push({l:'ok',e:'➡️',h:`ההוצאה <strong>יציבה יחסית</strong> לאורך התקופה — שינוי ממוצע של ₪${fmt0(Math.abs(slope))} בלבד לחודש`});
     }
   }
-  if(swingCat) items.push({l:'ok',e:'📊',
-    h:`תנודתיות גבוהה: <strong>${esc(swingCat)}</strong> — ${swingDir} של ₪${fmt(maxSwing)} בחודש בודד`});
+
+  // ── 3. Last 3 months vs first 3 months ─────────────────────────────────
+  if(n>=6){
+    const firstHalf=totals.slice(0,3).reduce((a,b)=>a+b,0)/3;
+    const lastHalf=totals.slice(-3).reduce((a,b)=>a+b,0)/3;
+    const delta=lastHalf-firstHalf, pct=Math.round(Math.abs(delta)/firstHalf*100);
+    items.push({l:delta>firstHalf*0.15?'warn':delta<-firstHalf*0.1?'ok':'ok',
+      e:delta>0?'📊':'📊',
+      h:`3 חודשים אחרונים לעומת 3 ראשונים: ממוצע <strong>${delta>=0?'+':''}₪${fmt0(delta)}</strong> לחודש (${delta>=0?'+':''}${pct}%)`});
+  }
+
+  // ── 4. Outlier months (>1.5 std dev from mean) ─────────────────────────
+  if(n>=4){
+    const variance=totals.reduce((s,t)=>s+(t-avg)**2,0)/n;
+    const std=Math.sqrt(variance);
+    const outliers=months.filter(m=>Math.abs(m.total-avg)>1.5*std)
+      .sort((a,b)=>Math.abs(b.total-avg)-Math.abs(a.total-avg));
+    if(outliers.length){
+      const o=outliers[0], diff=o.total-avg;
+      items.push({l:'warn',e:'⚡',
+        h:`חודש חריג: <strong>${esc(shortLabel(o.label))}</strong> — ₪${fmt(o.total)} (${diff>0?'+':''}₪${fmt0(diff)} מהממוצע, ${Math.round(Math.abs(diff)/std*10)/10} סטיות תקן)`});
+    }
+  }
+
+  // ── 5. Merchants present in ALL months (loyal/fixed expenses) ───────────
+  if(n>=3){
+    const loyal=mers.filter(m=>m.totals.every(t=>t>0));
+    const loyalTotal=loyal.reduce((s,m)=>s+m.grand,0);
+    const loyalPct=Math.round(loyalTotal/DATA.grand_total*100);
+    if(loyal.length){
+      items.push({l:loyalPct>40?'warn':'ok',e:'🔒',
+        h:`<strong>${loyal.length} בתי עסק</strong> חויבו בכל ${n} החודשים — ₪${fmt(loyalTotal)} סה"כ (${loyalPct}% מההוצאה הכוללת).<br>
+           <span style="font-size:12px;color:var(--muted)">${loyal.slice(0,4).map(m=>esc(m.name)).join(' · ')}${loyal.length>4?' ועוד…':''}</span>`});
+    }
+  }
+
+  // ── 6. New merchants in last month (didn't appear before) ──────────────
+  if(n>=2){
+    const prevMonthsMers=new Set(mers.flatMap(m=>
+      m.totals.slice(0,-1).some(t=>t>0)?[m.name]:[]));
+    const newMers=mers.filter(m=>m.totals[n-1]>0 && !prevMonthsMers.has(m.name));
+    if(newMers.length){
+      const newTotal=newMers.reduce((s,m)=>s+m.totals[n-1],0);
+      items.push({l:'ok',e:'🆕',
+        h:`<strong>${newMers.length} בתי עסק חדשים</strong> בחודש האחרון — ₪${fmt(newTotal)} סה"כ.<br>
+           <span style="font-size:12px;color:var(--muted)">${newMers.slice(0,4).map(m=>esc(m.name)).join(' · ')}${newMers.length>4?' ועוד…':''}</span>`});
+    }
+  }
+
+  // ── 7. Vanished merchants (were in first half, gone in last month) ──────
+  if(n>=3){
+    const hadBefore=mers.filter(m=>m.totals.slice(0,-2).some(t=>t>0) && m.totals[n-1]===0);
+    if(hadBefore.length){
+      items.push({l:'ok',e:'👻',
+        h:`<strong>${hadBefore.length} בתי עסק</strong> שנעלמו בחודש האחרון — לא חויבו לאחרונה.<br>
+           <span style="font-size:12px;color:var(--muted)">${hadBefore.slice(0,4).map(m=>esc(m.name)).join(' · ')}${hadBefore.length>4?' ועוד…':''}</span>`});
+    }
+  }
+
+  // ── 8. Category that grew the most over the full period ────────────────
+  if(n>=3 && cats.length){
+    let maxGrowth=-Infinity, growthCat='', growthFrom=0, growthTo=0;
+    for(const c of cats){
+      const first=c.totals.find(t=>t>0)||0;
+      const last=c.totals[n-1];
+      if(first>50 && last>0){
+        const growth=(last-first)/first;
+        if(growth>maxGrowth){maxGrowth=growth;growthCat=c.name;growthFrom=first;growthTo=last;}
+      }
+    }
+    if(growthCat && maxGrowth>0.2){
+      items.push({l:maxGrowth>0.5?'warn':'ok',e:'🚀',
+        h:`הקטגוריה עם הצמיחה הגדולה ביותר: <strong>${esc(growthCat)}</strong> — מ-₪${fmt0(growthFrom)} ל-₪${fmt0(growthTo)} (+${Math.round(maxGrowth*100)}% מחודש ראשון לאחרון)`});
+    }
+  }
+
+  // ── 9. Subscription price creep (standing orders that increased) ────────
+  if(n>=3){
+    let creepMer='', creepFrom=0, creepTo=0;
+    for(const m of mers){
+      // look for merchants that appear regularly and the last value is notably higher
+      const active=m.totals.filter(t=>t>0);
+      if(active.length>=Math.floor(n*0.6) && active.length>=3){
+        const firstActive=active[0], lastActive=active[active.length-1];
+        const creep=(lastActive-firstActive)/firstActive;
+        if(creep>0.15 && lastActive-firstActive > creepTo-creepFrom){
+          creepMer=m.name; creepFrom=firstActive; creepTo=lastActive;
+        }
+      }
+    }
+    if(creepMer){
+      items.push({l:'warn',e:'💸',
+        h:`זחילת מחיר: <strong>${esc(creepMer)}</strong> — מ-₪${fmt(creepFrom)} ל-₪${fmt(creepTo)} (+${Math.round((creepTo-creepFrom)/creepFrom*100)}%) לאורך התקופה`});
+    }
+  }
+
+  // ── 10. Most volatile category (highest coefficient of variation) ───────
+  if(n>=3 && cats.length){
+    let maxCV=0, volCat='', volStd=0, volMean=0;
+    for(const c of cats){
+      const active=c.totals.filter(t=>t>0);
+      if(active.length<2) continue;
+      const mean=active.reduce((a,b)=>a+b,0)/active.length;
+      const std=Math.sqrt(active.reduce((s,t)=>s+(t-mean)**2,0)/active.length);
+      const cv=mean>50?std/mean:0;
+      if(cv>maxCV){maxCV=cv;volCat=c.name;volStd=std;volMean=mean;}
+    }
+    if(volCat && maxCV>0.3){
+      items.push({l:'ok',e:'🌊',
+        h:`הקטגוריה הכי תנודתית: <strong>${esc(volCat)}</strong> — סטיית תקן ₪${fmt0(volStd)} סביב ממוצע ₪${fmt0(volMean)} לחודש`});
+    }
+  }
 
   document.getElementById('insights-grid').innerHTML=items.map(it=>
     `<div class="ic ${it.l}"><span class="emoji">${it.e}</span><span class="body">${it.h}</span></div>`
