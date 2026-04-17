@@ -12,14 +12,19 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import uuid
+from collections import OrderedDict
 from pathlib import Path
 
-from flask import Flask, request
+from flask import Flask, request, redirect
 
 from payments_ui import parse_payments, generate_html, generate_comparison_html, generate_multi_html
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
+
+# In-memory store for multi-month results (max 20 entries)
+_RESULT_CACHE: OrderedDict[str, str] = OrderedDict()
 
 UPLOAD_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -396,16 +401,12 @@ MULTI_FORM = """<!DOCTYPE html>
     for (const f of selected.files) fd.append('files', f);
 
     try {
-      const resp = await fetch('/multi', { method: 'POST', body: fd });
+      const resp = await fetch('/multi', { method: 'POST', body: fd, redirect: 'follow' });
       if (resp.ok) {
-        const html = await resp.text();
-        const base = `<base href="${window.location.origin}/">`;
-        const htmlWithBase = html.replace('<head>', '<head>' + base);
-        const blob = new Blob([htmlWithBase], { type: 'text/html' });
-        window.location.href = URL.createObjectURL(blob);
+        window.location.href = resp.url;
       } else {
         const text = await resp.text();
-        const m = text.match(/class="err">(.*?)<\/div>/s);
+        const m = text.match(/class="err">([\s\S]*?)<\/div>/);
         errEl.textContent = m ? m[1] : `שגיאה ${resp.status}`;
         errEl.style.display = 'block';
         submitEl.disabled = false;
@@ -456,9 +457,23 @@ def multi():
             return render_multi_form("יש להעלות קבצי .xlsx, .json או .pdf בלבד."), 400
     try:
         months_data = [_parse_upload(f) for f in files]
-        return generate_multi_html(months_data)
+        html = generate_multi_html(months_data)
+        # Store result with a UUID so the browser gets a real URL it can navigate from
+        result_id = str(uuid.uuid4())
+        _RESULT_CACHE[result_id] = html
+        if len(_RESULT_CACHE) > 20:          # keep last 20 results only
+            _RESULT_CACHE.popitem(last=False)
+        return redirect(f"/multi/result/{result_id}")
     except Exception as e:
         return render_multi_form(f"כשל בקריאת הקבצים: {e}"), 400
+
+
+@app.get("/multi/result/<result_id>")
+def multi_result(result_id: str):
+    html = _RESULT_CACHE.get(result_id)
+    if not html:
+        return redirect("/multi")
+    return html
 
 
 @app.post("/upload")
