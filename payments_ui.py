@@ -297,17 +297,8 @@ def _parse_cal_pdf(pdf_path: Path) -> dict:
             "notes": "",
         })
 
-    # Deduplicate (same word rows can appear on adjacent pages)
-    seen: set = set()
-    unique: list[dict] = []
-    for p in payments:
-        k = (p["date"], round(p["charge"], 2), p["merchant"][:12])
-        if k not in seen:
-            seen.add(k)
-            unique.append(p)
-
     # Normalize canonical names
-    for p in unique:
+    for p in payments:
         p["canonical"] = _normalize_merchant(p["merchant"])
 
     # Build a title from the PDF filename
@@ -317,7 +308,7 @@ def _parse_cal_pdf(pdf_path: Path) -> dict:
         "title": title,
         "source": pdf_path.name,
         "issuer": "cal_pdf",
-        "payments": unique,
+        "payments": payments,
     }
 
 
