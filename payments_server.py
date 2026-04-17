@@ -400,7 +400,8 @@ MULTI_FORM = """<!DOCTYPE html>
       const resp = await fetch('/multi', { method: 'POST', body: fd });
       if (resp.ok) {
         const html = await resp.text();
-        document.open(); document.write(html); document.close();
+        const blob = new Blob([html], { type: 'text/html' });
+        window.location.href = URL.createObjectURL(blob);
       } else {
         const text = await resp.text();
         const m = text.match(/class="err">(.*?)<\/div>/s);
