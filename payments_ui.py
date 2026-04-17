@@ -1848,6 +1848,7 @@ MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div style="display:flex;gap:8px;">
     <a href="/" class="btn">← קובץ חדש</a>
     <a href="/multi" class="btn">📂 העלאה חדשה</a>
+    <button class="btn" id="btn-save-html">💾 שמור HTML</button>
     <button class="btn" id="theme-toggle">🌙</button>
   </div>
 </header>
@@ -2182,6 +2183,17 @@ document.querySelectorAll('.section>h2').forEach(h=>{
 
 document.getElementById('mer-search').addEventListener('input', e => {
   renderMerTable(e.target.value.trim());
+});
+
+document.getElementById('btn-save-html').addEventListener('click', () => {
+  const html = '<!DOCTYPE html>' + document.documentElement.outerHTML;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const months = DATA.months.map(m => shortLabel(m.label)).join('_');
+  a.download = `השוואה_${months}.html`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 });
 
 initTheme();
