@@ -1814,9 +1814,20 @@ MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .chart-wrap.tall{height:380px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;}
-  th{background:var(--th-bg);font-weight:600;font-size:12px;position:sticky;top:0;z-index:1;}
+  th{background:var(--th-bg);font-weight:600;font-size:12px;position:sticky;top:0;z-index:2;}
   tr:hover td{background:var(--hover);}
-  td.name{white-space:normal;min-width:120px;}
+  /* Sticky first column — name stays visible while scrolling horizontally */
+  td.name,th.name-hdr{
+    position:sticky;right:0;background:var(--card);z-index:3;
+    min-width:130px;max-width:180px;white-space:normal;
+    border-left:1px solid var(--border-strong);
+    font-weight:600;
+  }
+  tr:hover td.name{background:var(--hover);}
+  .sum-row td.name{background:var(--th-bg);}
+  th.name-hdr{z-index:4;background:var(--th-bg);}
+  td.num-month{min-width:88px;color:var(--muted);font-size:12px;}
+  td.num-month.has-val{color:var(--text);}
   .num{font-variant-numeric:tabular-nums;}
   .up{color:var(--up);font-weight:700;}
   .down{color:var(--down);font-weight:700;}
@@ -1824,7 +1835,7 @@ MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .sum-row td{border-top:2px solid var(--border-strong);border-bottom:none;font-weight:700;background:var(--th-bg);}
   .grand{font-weight:700;color:var(--primary);}
   .empty{color:var(--soft);font-style:italic;padding:8px 0;}
-  .tbl-wrap{overflow-x:auto;}
+  .tbl-wrap{overflow-x:auto;border-radius:6px;}
   .insights-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;}
   .ic{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:8px;
       border-right:4px solid transparent;background:var(--bg);font-size:14px;line-height:1.5;}
@@ -1971,19 +1982,24 @@ function renderCharts(){
 }
 
 // ── Category table ──────────────────────────────────────────────────────────
+function shortLabel(label){
+  // "דף פירוט דיגיטלי כאל 01-25" → "01-25", or keep as-is if short
+  const m = label.match(/(\d{2}-\d{2,4})$/);
+  return m ? m[1] : (label.length > 10 ? label.slice(-7) : label);
+}
+
 function renderCatTable(){
   const months=DATA.months; const cats=DATA.cat_matrix;
   if(!cats.length){document.getElementById('cat-table').innerHTML='<tr><td class="empty">אין נתונים</td></tr>';return;}
-  const hdrs=['קטגוריה',...months.map(m=>`<th>${esc(m.label)}</th>`),'<th class="grand">סה"כ</th>'].join('');
+  const hdrs=`<th class="name-hdr">קטגוריה</th>${months.map(m=>`<th title="${esc(m.label)}">${esc(shortLabel(m.label))}</th>`).join('')}<th class="grand">סה"כ</th>`;
   const rows=cats.map(c=>{
-    const cells=c.totals.map(t=>`<td class="num">${t>0?fmt(t):'—'}</td>`).join('');
+    const cells=c.totals.map(t=>`<td class="num num-month ${t>0?'has-val':''}">${t>0?fmt(t):'—'}</td>`).join('');
     return `<tr><td class="name">${esc(c.name)}</td>${cells}<td class="num grand">${fmt(c.grand)}</td></tr>`;
   });
-  // Column totals
   const colTotals=months.map((_,i)=>cats.reduce((s,c)=>s+c.totals[i],0));
   const grandSum=cats.reduce((s,c)=>s+c.grand,0);
-  const sumRow=`<tr class="sum-row"><td>סה"כ</td>${colTotals.map(t=>`<td class="num">${fmt(t)}</td>`).join('')}<td class="num grand">${fmt(grandSum)}</td></tr>`;
-  document.getElementById('cat-table').innerHTML=`<thead><tr><th>${hdrs}</tr></thead><tbody>${rows.join('')}${sumRow}</tbody>`;
+  const sumRow=`<tr class="sum-row"><td class="name">סה"כ</td>${colTotals.map(t=>`<td class="num">${fmt(t)}</td>`).join('')}<td class="num grand">${fmt(grandSum)}</td></tr>`;
+  document.getElementById('cat-table').innerHTML=`<thead><tr>${hdrs}</tr></thead><tbody>${rows.join('')}${sumRow}</tbody>`;
 }
 
 // ── Merchant table ──────────────────────────────────────────────────────────
@@ -1992,9 +2008,9 @@ function renderMerTable(q=''){
   let mers=DATA.mer_matrix;
   if(q) mers=mers.filter(m=>m.name.toLowerCase().includes(q.toLowerCase()));
   if(!mers.length){document.getElementById('mer-table').innerHTML=`<tr><td colspan="${months.length+3}" class="empty">${q?'לא נמצאו תוצאות':'אין נתונים'}</td></tr>`;return;}
-  const hdrs=['בית עסק',...months.map(m=>`<th>${esc(m.label)}</th>`),'<th class="grand">סה"כ</th>','<th>מגמה</th>'].join('');
+  const hdrs=`<th class="name-hdr">בית עסק</th>${months.map(m=>`<th title="${esc(m.label)}">${esc(shortLabel(m.label))}</th>`).join('')}<th class="grand">סה"כ</th><th>מגמה</th>`;
   const rows=mers.map(m=>{
-    const cells=m.totals.map(t=>`<td class="num">${t>0?fmt(t):'—'}</td>`).join('');
+    const cells=m.totals.map(t=>`<td class="num num-month ${t>0?'has-val':''}">${t>0?fmt(t):'—'}</td>`).join('');
     const d=m.last_delta;
     const trend=DATA.months.length<2?'<span class="flat">—</span>':
       d>0.5?`<span class="up">↑ ₪${fmt0(Math.abs(d))}</span>`:
@@ -2003,8 +2019,8 @@ function renderMerTable(q=''){
   });
   const colTotals=months.map((_,i)=>mers.reduce((s,m)=>s+m.totals[i],0));
   const grandSum=mers.reduce((s,m)=>s+m.grand,0);
-  const sumRow=`<tr class="sum-row"><td>סה"כ</td>${colTotals.map(t=>`<td class="num">${fmt(t)}</td>`).join('')}<td class="num grand">${fmt(grandSum)}</td><td></td></tr>`;
-  document.getElementById('mer-table').innerHTML=`<thead><tr><th>${hdrs}</tr></thead><tbody>${rows.join('')}${sumRow}</tbody>`;
+  const sumRow=`<tr class="sum-row"><td class="name">סה"כ</td>${colTotals.map(t=>`<td class="num">${fmt(t)}</td>`).join('')}<td class="num grand">${fmt(grandSum)}</td><td></td></tr>`;
+  document.getElementById('mer-table').innerHTML=`<thead><tr>${hdrs}</tr></thead><tbody>${rows.join('')}${sumRow}</tbody>`;
 }
 
 // ── Insights ────────────────────────────────────────────────────────────────
