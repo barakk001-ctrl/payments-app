@@ -16,7 +16,7 @@ from pathlib import Path
 
 from flask import Flask, request
 
-from payments_ui import parse_payments, generate_html, generate_comparison_html
+from payments_ui import parse_payments, generate_html, generate_comparison_html, generate_multi_html
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
@@ -67,8 +67,9 @@ UPLOAD_FORM = """<!DOCTYPE html>
       <div class="filename" id="filename"></div>
       <button type="submit" id="submit" disabled>יצירת תצוגה</button>
     </form>
-    <div style="text-align:center;margin-top:16px;font-size:13px;">
+    <div style="text-align:center;margin-top:16px;font-size:13px;display:flex;flex-direction:column;gap:8px;">
       <a href="/compare" style="color:#2196f3;text-decoration:none;">השוואה בין שני חודשים →</a>
+      <a href="/multi" style="color:#2196f3;text-decoration:none;">השוואת עד 12 חודשים →</a>
     </div>
   </div>
 <script>
@@ -276,6 +277,148 @@ def compare():
         return render_compare_form(f"כשל בקריאת הקבצים: {e}"), 400
 
     return html
+
+
+MULTI_FORM = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Payments — השוואת חודשים מרובים</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#f5f5f7;
+       color:#222;display:flex;align-items:center;justify-content:center;
+       min-height:100vh;margin:0;padding:20px;}
+  .card{background:#fff;padding:32px 36px;border-radius:12px;
+        box-shadow:0 2px 16px rgba(0,0,0,.08);max-width:560px;width:100%;}
+  h1{font-size:20px;margin:0 0 6px;}
+  p{color:#666;font-size:14px;margin:0 0 20px;}
+  .drop-zone{border:2px dashed #ccc;border-radius:8px;padding:32px 16px;
+             text-align:center;cursor:pointer;transition:.15s;background:#fafafa;}
+  .drop-zone:hover,.drop-zone.drag{border-color:#2196f3;background:#e3f2fd;}
+  .drop-zone input{display:none;}
+  .drop-zone .icon{font-size:36px;line-height:1;margin-bottom:10px;}
+  .drop-zone .lbl{font-size:14px;color:#444;}
+  .drop-zone .sub{font-size:12px;color:#888;margin-top:4px;}
+  .file-list{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
+  .file-item{display:flex;align-items:center;justify-content:space-between;
+             padding:6px 10px;background:#f0f4ff;border-radius:6px;font-size:13px;}
+  .file-item button{background:none;border:none;color:#999;cursor:pointer;font-size:16px;padding:0 4px;}
+  .file-item button:hover{color:#e53935;}
+  .counter{font-size:12px;color:#888;margin-top:6px;text-align:center;}
+  button[type=submit]{margin-top:16px;width:100%;padding:12px;background:#2196f3;
+    color:#fff;border:0;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;}
+  button[type=submit]:hover:not(:disabled){background:#1976d2;}
+  button[type=submit]:disabled{background:#ccc;cursor:not-allowed;}
+  .err{background:#ffebee;color:#c62828;padding:10px 12px;border-radius:6px;
+       font-size:13px;margin-bottom:14px;}
+  .back{display:block;text-align:center;margin-top:16px;font-size:13px;color:#2196f3;text-decoration:none;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>השוואת חודשים מרובים</h1>
+  <p>העלו בין 2 ל-12 קבצי Excel (.xlsx) או JSON כדי לראות השוואה מלאה בין החודשים.</p>
+  __ERROR__
+  <form id="form" action="/multi" method="POST" enctype="multipart/form-data">
+    <div class="drop-zone" id="drop">
+      <div class="icon">📂</div>
+      <div class="lbl">גררו קבצים או לחצו לבחירה</div>
+      <div class="sub">.xlsx / .json · עד 12 קבצים</div>
+      <input type="file" name="files" id="files" accept=".xlsx,.json" multiple>
+    </div>
+    <div class="file-list" id="file-list"></div>
+    <div class="counter" id="counter"></div>
+    <button type="submit" id="submit" disabled>יצירת השוואה</button>
+  </form>
+  <a class="back" href="/">← חזרה</a>
+</div>
+<script>
+  const MAX = 12;
+  let selected = new DataTransfer();
+
+  const dropEl   = document.getElementById('drop');
+  const filesEl  = document.getElementById('files');
+  const listEl   = document.getElementById('file-list');
+  const counterEl= document.getElementById('counter');
+  const submitEl = document.getElementById('submit');
+
+  function refreshUI() {
+    const files = [...selected.files];
+    listEl.innerHTML = files.map((f, i) => `
+      <div class="file-item">
+        <span>📄 ${f.name}</span>
+        <button type="button" data-i="${i}" title="הסר">✕</button>
+      </div>`).join('');
+    counterEl.textContent = files.length ? `${files.length} / ${MAX} קבצים נבחרו` : '';
+    submitEl.disabled = files.length < 2;
+    filesEl.files = selected.files;
+    listEl.querySelectorAll('button[data-i]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.i);
+        const next = new DataTransfer();
+        [...selected.files].forEach((f, i) => { if (i !== idx) next.items.add(f); });
+        selected = next;
+        refreshUI();
+      });
+    });
+  }
+
+  function addFiles(newFiles) {
+    for (const f of newFiles) {
+      if (selected.files.length >= MAX) break;
+      const ext = f.name.toLowerCase();
+      if (!ext.endsWith('.xlsx') && !ext.endsWith('.json')) continue;
+      // avoid duplicates by name
+      if ([...selected.files].some(e => e.name === f.name)) continue;
+      selected.items.add(f);
+    }
+    refreshUI();
+  }
+
+  filesEl.addEventListener('change', () => { addFiles(filesEl.files); filesEl.value=''; });
+  dropEl.addEventListener('click', () => filesEl.click());
+  dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag'); });
+  dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag'));
+  dropEl.addEventListener('drop', e => {
+    e.preventDefault(); dropEl.classList.remove('drag');
+    addFiles(e.dataTransfer.files);
+  });
+  document.getElementById('form').addEventListener('submit', () => {
+    submitEl.disabled = true; submitEl.textContent = 'מעבד...';
+  });
+</script>
+</body>
+</html>
+"""
+
+
+def render_multi_form(error: str | None = None) -> str:
+    err_html = f'<div class="err">{error}</div>' if error else ""
+    return MULTI_FORM.replace("__ERROR__", err_html)
+
+
+@app.get("/multi")
+def multi_form():
+    return render_multi_form()
+
+
+@app.post("/multi")
+def multi():
+    files = request.files.getlist("files")
+    files = [f for f in files if f and f.filename]
+    if len(files) < 2:
+        return render_multi_form("יש לבחור לפחות 2 קבצים."), 400
+    if len(files) > 12:
+        return render_multi_form("ניתן להעלות עד 12 קבצים בלבד."), 400
+    for f in files:
+        if not f.filename.lower().endswith((".xlsx", ".json")):
+            return render_multi_form("יש להעלות קבצי .xlsx או .json בלבד."), 400
+    try:
+        months_data = [_parse_upload(f) for f in files]
+        return generate_multi_html(months_data)
+    except Exception as e:
+        return render_multi_form(f"כשל בקריאת הקבצים: {e}"), 400
 
 
 @app.post("/upload")

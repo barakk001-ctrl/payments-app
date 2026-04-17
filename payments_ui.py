@@ -1493,6 +1493,379 @@ def generate_comparison_html(data_a: dict, data_b: dict) -> str:
     return COMPARE_HTML_TEMPLATE.replace("__DATA__", json.dumps(comparison, ensure_ascii=False))
 
 
+# ---------------------------------------------------------------------------
+# Multi-month comparison (up to 12 files)
+# ---------------------------------------------------------------------------
+
+def build_multi(months_data: list[dict]) -> dict:
+    """Build a multi-month comparison payload from a list of parsed payment dicts."""
+
+    # Sort months by their earliest transaction date
+    def _month_key(d):
+        dates = [p["date"] for p in d["payments"] if p["date"]]
+        return min(dates) if dates else d.get("source", "")
+
+    months_data = sorted(months_data, key=_month_key)
+
+    months = []
+    all_cat_names: set = set()
+    all_mer_names: set = set()
+
+    for d in months_data:
+        pays = d["payments"]
+        total = round(sum(p["charge"] for p in pays), 2)
+        cat_totals: dict = defaultdict(float)
+        mer_totals: dict = defaultdict(float)
+        for p in pays:
+            cat_totals[p["category"] or "ללא קטגוריה"] += p["charge"]
+            mer_totals[p.get("canonical") or p["merchant"]] += p["charge"]
+        all_cat_names |= set(cat_totals.keys())
+        all_mer_names |= set(mer_totals.keys())
+        months.append({
+            "label": d.get("title") or d.get("source") or "—",
+            "source": d.get("source", ""),
+            "total": total,
+            "count": len(pays),
+            "cat": {k: round(v, 2) for k, v in cat_totals.items()},
+            "mer": {k: round(v, 2) for k, v in mer_totals.items()},
+        })
+
+    # Top categories by total across all months
+    cat_grand = {c: sum(m["cat"].get(c, 0) for m in months) for c in all_cat_names}
+    top_cats = [k for k, _ in sorted(cat_grand.items(), key=lambda x: -x[1])][:10]
+
+    # Category matrix: list of {name, totals:[...per month], grand_total}
+    cat_matrix = [
+        {
+            "name": c,
+            "totals": [round(m["cat"].get(c, 0), 2) for m in months],
+            "grand": round(cat_grand[c], 2),
+        }
+        for c in top_cats
+    ]
+
+    # Top merchants by total across all months
+    mer_grand = {m: sum(mo["mer"].get(m, 0) for mo in months) for m in all_mer_names}
+    top_mers = [k for k, _ in sorted(mer_grand.items(), key=lambda x: -x[1])][:20]
+
+    mer_matrix = [
+        {
+            "name": m,
+            "totals": [round(mo["mer"].get(m, 0), 2) for mo in months],
+            "grand": round(mer_grand[m], 2),
+            "last_delta": round(
+                months[-1]["mer"].get(m, 0) - months[-2]["mer"].get(m, 0), 2
+            ) if len(months) >= 2 else 0,
+        }
+        for m in top_mers
+    ]
+
+    grand_total = round(sum(m["total"] for m in months), 2)
+    avg = round(grand_total / len(months), 2) if months else 0
+    peak = max(months, key=lambda m: m["total"]) if months else None
+    low  = min(months, key=lambda m: m["total"]) if months else None
+
+    return {
+        "months": months,
+        "cat_matrix": cat_matrix,
+        "mer_matrix": mer_matrix,
+        "grand_total": grand_total,
+        "avg_monthly": avg,
+        "peak_label": peak["label"] if peak else "",
+        "peak_total": peak["total"] if peak else 0,
+        "low_label":  low["label"]  if low  else "",
+        "low_total":  low["total"]  if low  else 0,
+        "high_threshold": HIGH_THRESHOLD,
+    }
+
+
+MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="he" dir="rtl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>השוואת חודשים מרובים</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#f5f5f7;--card:#fff;--text:#222;--muted:#666;--soft:#888;
+    --border:#eee;--border-strong:#ddd;--hover:#f8f8fb;--th-bg:#fafafa;
+    --shadow:0 1px 3px rgba(0,0,0,.08);
+    --primary:#2196f3;--up:#c62828;--down:#2e7d32;
+  }
+  [data-theme="dark"]{
+    --bg:#111418;--card:#1c2128;--text:#e6edf3;--muted:#9aa4af;--soft:#7a8591;
+    --border:#2a323c;--border-strong:#394350;--hover:#232b36;--th-bg:#1a2028;
+    --shadow:0 1px 3px rgba(0,0,0,.4);
+    --primary:#64b5f6;--up:#ef5350;--down:#66bb6a;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;margin:0;padding:24px;
+       background:var(--bg);color:var(--text);transition:background .2s,color .2s;}
+  header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px;}
+  header h1{font-size:20px;margin:0;}
+  .btn{background:var(--card);color:var(--text);border:1px solid var(--border-strong);
+       height:36px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;
+       padding:0 14px;box-shadow:var(--shadow);text-decoration:none;display:inline-flex;align-items:center;}
+  .btn:hover{background:var(--hover);}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;}
+  .card{background:var(--card);padding:16px;border-radius:10px;box-shadow:var(--shadow);}
+  .card .lbl{font-size:11px;color:var(--muted);letter-spacing:.5px;}
+  .card .val{font-size:22px;font-weight:600;margin-top:4px;}
+  .card .sub{font-size:12px;color:var(--soft);margin-top:2px;}
+  .section{background:var(--card);padding:16px 20px;border-radius:10px;box-shadow:var(--shadow);margin-bottom:20px;}
+  .section>h2{margin:0 0 14px;font-size:16px;cursor:pointer;user-select:none;}
+  .section.collapsed>:not(h2){display:none;}
+  .section>h2::before{content:"▾";display:inline-block;width:1em;font-size:11px;color:var(--muted);transform:scaleX(-1);}
+  .section.collapsed>h2::before{content:"▸";}
+  .chart-wrap{position:relative;height:300px;}
+  .chart-wrap.tall{height:380px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap;}
+  th{background:var(--th-bg);font-weight:600;font-size:12px;position:sticky;top:0;z-index:1;}
+  tr:hover td{background:var(--hover);}
+  td.name{white-space:normal;min-width:120px;}
+  .num{font-variant-numeric:tabular-nums;}
+  .up{color:var(--up);font-weight:700;}
+  .down{color:var(--down);font-weight:700;}
+  .flat{color:var(--soft);}
+  .sum-row td{border-top:2px solid var(--border-strong);border-bottom:none;font-weight:700;background:var(--th-bg);}
+  .grand{font-weight:700;color:var(--primary);}
+  .empty{color:var(--soft);font-style:italic;padding:8px 0;}
+  .tbl-wrap{overflow-x:auto;}
+  .insights-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;}
+  .ic{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:8px;
+      border-right:4px solid transparent;background:var(--bg);font-size:14px;line-height:1.5;}
+  .ic.ok{border-color:#43a047;} .ic.warn{border-color:#fb8c00;} .ic.alert{border-color:var(--up);}
+  .ic .emoji{font-size:20px;flex-shrink:0;margin-top:1px;}
+  .ic .body{flex:1;} .ic .body strong{color:var(--primary);font-weight:700;}
+</style>
+</head>
+<body>
+<header>
+  <h1>השוואת חודשים מרובים</h1>
+  <div style="display:flex;gap:8px;">
+    <a href="/" class="btn">← קובץ חדש</a>
+    <a href="/multi" class="btn">📂 העלאה חדשה</a>
+    <button class="btn" id="theme-toggle">🌙</button>
+  </div>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<div class="section">
+  <h2>הוצאה לפי חודש</h2>
+  <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>קטגוריות לפי חודש (מוערם)</h2>
+  <div class="chart-wrap tall"><canvas id="chart-cat-stacked"></canvas></div>
+</div>
+
+<div class="section" id="sec-insights">
+  <h2>תובנות 🧠</h2>
+  <div class="insights-grid" id="insights-grid"></div>
+</div>
+
+<div class="section">
+  <h2>טבלת קטגוריות לפי חודש</h2>
+  <div class="tbl-wrap"><table id="cat-table"></table></div>
+</div>
+
+<div class="section">
+  <h2>Top בתי עסק לפי חודש</h2>
+  <div class="tbl-wrap"><table id="mer-table"></table></div>
+</div>
+
+<script>
+const DATA = __DATA__;
+const fmt  = n => new Intl.NumberFormat('he-IL',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+const fmt0 = n => new Intl.NumberFormat('he-IL',{maximumFractionDigits:0}).format(n);
+const esc  = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const COLORS = ['#2196f3','#ef6c00','#43a047','#8e24aa','#e53935','#00acc1','#fb8c00','#6d4c41','#546e7a','#d81b60','#7cb342','#3949ab'];
+
+function applyTheme(t){
+  document.documentElement.dataset.theme=t;
+  document.getElementById('theme-toggle').textContent=t==='dark'?'☀️':'🌙';
+  renderCharts();
+}
+(function initTheme(){
+  const saved=localStorage.getItem('payments-theme')||(window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+  applyTheme(saved);
+  document.getElementById('theme-toggle').addEventListener('click',()=>{
+    const next=document.documentElement.dataset.theme==='dark'?'light':'dark';
+    localStorage.setItem('payments-theme',next); applyTheme(next);
+  });
+})();
+
+// ── Cards ──────────────────────────────────────────────────────────────────
+function renderCards(){
+  const items=[
+    ['חודשים',DATA.months.length,'קבצים שהועלו'],
+    ['סה"כ כולל','₪'+fmt(DATA.grand_total),DATA.months.reduce((s,m)=>s+m.count,0)+' עסקאות'],
+    ['ממוצע חודשי','₪'+fmt(DATA.avg_monthly),''],
+    ['חודש יקר ביותר','₪'+fmt(DATA.peak_total),esc(DATA.peak_label)],
+    ['חודש זול ביותר','₪'+fmt(DATA.low_total),esc(DATA.low_label)],
+  ];
+  document.getElementById('cards').innerHTML=items.map(([l,v,s])=>
+    `<div class="card"><div class="lbl">${esc(l)}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`
+  ).join('');
+}
+
+// ── Charts ─────────────────────────────────────────────────────────────────
+let charts={};
+function destroyCharts(){Object.values(charts).forEach(c=>c&&c.destroy());charts={};}
+
+function renderCharts(){
+  if(typeof Chart==='undefined') return;
+  destroyCharts();
+  const text=getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#222';
+  const grid=getComputedStyle(document.documentElement).getPropertyValue('--border').trim()||'#eee';
+  Chart.defaults.color=text; Chart.defaults.borderColor=grid;
+
+  const labels=DATA.months.map(m=>esc(m.label));
+
+  // Monthly totals bar
+  charts.monthly=new Chart(document.getElementById('chart-monthly'),{
+    type:'bar',
+    data:{labels,datasets:[{data:DATA.months.map(m=>m.total),backgroundColor:'#2196f3',borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' ₪'+fmt(ctx.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>'₪'+fmt0(v),font:{size:10}}},x:{ticks:{font:{size:10}}}},
+    },
+  });
+
+  // Stacked category bar
+  const cats=DATA.cat_matrix;
+  charts.catStacked=new Chart(document.getElementById('chart-cat-stacked'),{
+    type:'bar',
+    data:{
+      labels,
+      datasets:cats.map((c,i)=>({
+        label:c.name, data:c.totals,
+        backgroundColor:COLORS[i%COLORS.length], stack:'s',
+      })),
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ₪${fmt0(ctx.parsed.y)}`}}},
+      scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,ticks:{callback:v=>'₪'+fmt0(v),font:{size:10}}}},
+    },
+  });
+}
+
+// ── Category table ──────────────────────────────────────────────────────────
+function renderCatTable(){
+  const months=DATA.months; const cats=DATA.cat_matrix;
+  if(!cats.length){document.getElementById('cat-table').innerHTML='<tr><td class="empty">אין נתונים</td></tr>';return;}
+  const hdrs=['קטגוריה',...months.map(m=>`<th>${esc(m.label)}</th>`),'<th class="grand">סה"כ</th>'].join('');
+  const rows=cats.map(c=>{
+    const cells=c.totals.map(t=>`<td class="num">${t>0?fmt(t):'—'}</td>`).join('');
+    return `<tr><td class="name">${esc(c.name)}</td>${cells}<td class="num grand">${fmt(c.grand)}</td></tr>`;
+  });
+  // Column totals
+  const colTotals=months.map((_,i)=>cats.reduce((s,c)=>s+c.totals[i],0));
+  const grandSum=cats.reduce((s,c)=>s+c.grand,0);
+  const sumRow=`<tr class="sum-row"><td>סה"כ</td>${colTotals.map(t=>`<td class="num">${fmt(t)}</td>`).join('')}<td class="num grand">${fmt(grandSum)}</td></tr>`;
+  document.getElementById('cat-table').innerHTML=`<thead><tr><th>${hdrs}</tr></thead><tbody>${rows.join('')}${sumRow}</tbody>`;
+}
+
+// ── Merchant table ──────────────────────────────────────────────────────────
+function renderMerTable(){
+  const months=DATA.months; const mers=DATA.mer_matrix;
+  if(!mers.length){document.getElementById('mer-table').innerHTML='<tr><td class="empty">אין נתונים</td></tr>';return;}
+  const hdrs=['בית עסק',...months.map(m=>`<th>${esc(m.label)}</th>`),'<th class="grand">סה"כ</th>','<th>מגמה</th>'].join('');
+  const rows=mers.map(m=>{
+    const cells=m.totals.map(t=>`<td class="num">${t>0?fmt(t):'—'}</td>`).join('');
+    const d=m.last_delta;
+    const trend=DATA.months.length<2?'<span class="flat">—</span>':
+      d>0.5?`<span class="up">↑ ₪${fmt0(Math.abs(d))}</span>`:
+      d<-0.5?`<span class="down">↓ ₪${fmt0(Math.abs(d))}</span>`:'<span class="flat">→</span>';
+    return `<tr><td class="name">${esc(m.name)}</td>${cells}<td class="num grand">${fmt(m.grand)}</td><td>${trend}</td></tr>`;
+  });
+  const colTotals=months.map((_,i)=>mers.reduce((s,m)=>s+m.totals[i],0));
+  const grandSum=mers.reduce((s,m)=>s+m.grand,0);
+  const sumRow=`<tr class="sum-row"><td>סה"כ</td>${colTotals.map(t=>`<td class="num">${fmt(t)}</td>`).join('')}<td class="num grand">${fmt(grandSum)}</td><td></td></tr>`;
+  document.getElementById('mer-table').innerHTML=`<thead><tr><th>${hdrs}</tr></thead><tbody>${rows.join('')}${sumRow}</tbody>`;
+}
+
+// ── Insights ────────────────────────────────────────────────────────────────
+function renderInsights(){
+  const months=DATA.months; const cats=DATA.cat_matrix; const mers=DATA.mer_matrix;
+  const items=[];
+
+  // Overview
+  items.push({l:'ok',e:'📅',
+    h:`<strong>${months.length} חודשים</strong> בסה"כ · ממוצע חודשי <strong>₪${fmt(DATA.avg_monthly)}</strong>`});
+
+  // Trend: last vs prev month
+  if(months.length>=2){
+    const last=months[months.length-1], prev=months[months.length-2];
+    const d=last.total-prev.total, pct=Math.abs(Math.round(d/prev.total*100));
+    items.push({l:d>prev.total*.15?'warn':'ok',e:d>=0?'⬆️':'⬇️',
+      h:`${esc(last.label)} לעומת ${esc(prev.label)}: <strong>${d>=0?'+':''}₪${fmt(d)}</strong> (${d>=0?'+':''}${pct}%)`});
+  }
+
+  // Peak & low
+  items.push({l:'ok',e:'📈',
+    h:`חודש יקר: <strong>${esc(DATA.peak_label)}</strong> — ₪${fmt(DATA.peak_total)} | חודש זול: <strong>${esc(DATA.low_label)}</strong> — ₪${fmt(DATA.low_total)}`});
+
+  // Fastest growing merchant
+  const rising=DATA.mer_matrix.filter(m=>m.last_delta>0).sort((a,b)=>b.last_delta-a.last_delta)[0];
+  if(rising) items.push({l:'warn',e:'🔺',
+    h:`בית עסק עם עלייה הגדולה ביותר: <strong>${esc(rising.name)}</strong> — +₪${fmt(rising.last_delta)} בחודש האחרון`});
+
+  // Fastest shrinking merchant
+  const shrinking=DATA.mer_matrix.filter(m=>m.last_delta<0).sort((a,b)=>a.last_delta-b.last_delta)[0];
+  if(shrinking) items.push({l:'ok',e:'📉',
+    h:`בית עסק עם ירידה הגדולה ביותר: <strong>${esc(shrinking.name)}</strong> — ${fmt(shrinking.last_delta)}₪ בחודש האחרון`});
+
+  // Top category
+  if(cats.length) items.push({l:'ok',e:'🏆',
+    h:`קטגוריה מובילה: <strong>${esc(cats[0].name)}</strong> — ₪${fmt(cats[0].grand)} סה"כ`});
+
+  // Top merchant
+  if(mers.length) items.push({l:'ok',e:'🏪',
+    h:`בית עסק מוביל: <strong>${esc(mers[0].name)}</strong> — ₪${fmt(mers[0].grand)} סה"כ`});
+
+  // Biggest single-month swing in any category
+  let maxSwing=0,swingCat='',swingDir='';
+  for(const c of cats){
+    for(let i=1;i<c.totals.length;i++){
+      const sw=Math.abs(c.totals[i]-c.totals[i-1]);
+      if(sw>maxSwing){maxSwing=sw;swingCat=c.name;swingDir=c.totals[i]>c.totals[i-1]?'עלייה':'ירידה';}
+    }
+  }
+  if(swingCat) items.push({l:'ok',e:'📊',
+    h:`תנודתיות גבוהה: <strong>${esc(swingCat)}</strong> — ${swingDir} של ₪${fmt(maxSwing)} בחודש בודד`});
+
+  document.getElementById('insights-grid').innerHTML=items.map(it=>
+    `<div class="ic ${it.l}"><span class="emoji">${it.e}</span><span class="body">${it.h}</span></div>`
+  ).join('');
+}
+
+// ── Collapsible sections ────────────────────────────────────────────────────
+document.querySelectorAll('.section>h2').forEach(h=>{
+  h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
+});
+
+renderCards();
+renderInsights();
+renderCatTable();
+renderMerTable();
+renderCharts();
+</script>
+</body>
+</html>
+"""
+
+
+def generate_multi_html(months_data: list[dict]) -> str:
+    payload = build_multi(months_data)
+    return MULTI_HTML_TEMPLATE.replace("__DATA__", json.dumps(payload, ensure_ascii=False))
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
