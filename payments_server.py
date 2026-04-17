@@ -55,14 +55,14 @@ UPLOAD_FORM = """<!DOCTYPE html>
 <body>
   <div class="card">
     <h1>העלאת קובץ עסקאות</h1>
-    <p>בחרו קובץ Excel (.xlsx) של פירוט חיובים, או קובץ JSON שנשמר קודם — כדי לייצר תצוגה אינטראקטיבית.</p>
+    <p>בחרו קובץ Excel (.xlsx), PDF של פירוט כאל, או JSON שנשמר קודם — כדי לייצר תצוגה אינטראקטיבית.</p>
     __ERROR__
     <form id="form" action="/upload" method="POST" enctype="multipart/form-data">
       <label class="drop" id="drop">
         <div class="icon">📄</div>
         <div class="label">גררו קובץ או לחצו לבחירה</div>
-        <div class="sub">.xlsx / .json · עד 16MB</div>
-        <input type="file" name="file" id="file" accept=".xlsx,.json" required>
+        <div class="sub">.xlsx / .json / .pdf · עד 16MB</div>
+        <input type="file" name="file" id="file" accept=".xlsx,.json,.pdf" required>
       </label>
       <div class="filename" id="filename"></div>
       <button type="submit" id="submit" disabled>יצירת תצוגה</button>
@@ -144,7 +144,7 @@ COMPARE_FORM = """<!DOCTYPE html>
 <body>
   <div class="card">
     <h1>השוואת שני חודשים</h1>
-    <p>העלו שני קבצי .xlsx או .json (למשל ינואר ופברואר) כדי לראות שינויים לפי ענף ובית עסק.</p>
+    <p>העלו שני קבצי .xlsx, .json או .pdf (למשל ינואר ופברואר) כדי לראות שינויים לפי ענף ובית עסק.</p>
     __ERROR__
     <form id="form" action="/compare" method="POST" enctype="multipart/form-data">
       <div class="row">
@@ -154,7 +154,7 @@ COMPARE_FORM = """<!DOCTYPE html>
             <div class="icon">📄</div>
             <div class="label">בחרו קובץ</div>
             <div class="sub">.xlsx / .json</div>
-            <input type="file" name="file_a" id="file_a" accept=".xlsx,.json" required>
+            <input type="file" name="file_a" id="file_a" accept=".xlsx,.json,.pdf" required>
           </label>
           <div class="fname" id="fname_a"></div>
         </div>
@@ -164,7 +164,7 @@ COMPARE_FORM = """<!DOCTYPE html>
             <div class="icon">📄</div>
             <div class="label">בחרו קובץ</div>
             <div class="sub">.xlsx / .json</div>
-            <input type="file" name="file_b" id="file_b" accept=".xlsx,.json" required>
+            <input type="file" name="file_b" id="file_b" accept=".xlsx,.json,.pdf" required>
           </label>
           <div class="fname" id="fname_b"></div>
         </div>
@@ -218,25 +218,24 @@ def render_compare_form(error: str | None = None) -> str:
 
 def _parse_upload(f) -> dict:
     """Save an uploaded file to a temp path, parse it, and clean up.
-    Accepts .xlsx (Excel) or .json (previously saved via the Save JSON button).
+    Accepts .xlsx (Excel), .json (saved via Save JSON), or .pdf (Cal digital statement).
     """
     fname = f.filename.lower()
     if fname.endswith(".json"):
         data = json.loads(f.read().decode("utf-8"))
-        # Ensure required keys exist
         if "payments" not in data:
             raise ValueError("JSON חסר מפתח 'payments'")
         data.setdefault("title", Path(f.filename).stem)
         data.setdefault("source", f.filename)
         data.setdefault("issuer", "")
-        # Re-normalize canonical names in case they're missing
         from payments_ui import _normalize_merchant
         for p in data["payments"]:
             if "canonical" not in p:
                 p["canonical"] = _normalize_merchant(p.get("merchant", ""))
         return data
 
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+    suffix = ".pdf" if fname.endswith(".pdf") else ".xlsx"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         f.save(tmp.name)
         tmp_path = Path(tmp.name)
     try:
@@ -266,8 +265,8 @@ def compare():
     if not fa or not fa.filename or not fb or not fb.filename:
         return render_compare_form("יש לבחור שני קבצים."), 400
     for f in (fa, fb):
-        if not f.filename.lower().endswith((".xlsx", ".json")):
-            return render_compare_form("יש להעלות קבצי .xlsx או .json בלבד."), 400
+        if not f.filename.lower().endswith((".xlsx", ".json", ".pdf")):
+            return render_compare_form("יש להעלות קבצי .xlsx, .json או .pdf בלבד."), 400
 
     try:
         data_a = _parse_upload(fa)
@@ -325,7 +324,7 @@ MULTI_FORM = """<!DOCTYPE html>
       <div class="icon">📂</div>
       <div class="lbl">גררו קבצים או לחצו לבחירה</div>
       <div class="sub">.xlsx / .json · עד 12 קבצים</div>
-      <input type="file" name="files" id="files" accept=".xlsx,.json" multiple>
+      <input type="file" name="files" id="files" accept=".xlsx,.json,.pdf" multiple>
     </div>
     <div class="file-list" id="file-list"></div>
     <div class="counter" id="counter"></div>
@@ -368,7 +367,7 @@ MULTI_FORM = """<!DOCTYPE html>
     for (const f of newFiles) {
       if (selected.files.length >= MAX) break;
       const ext = f.name.toLowerCase();
-      if (!ext.endsWith('.xlsx') && !ext.endsWith('.json')) continue;
+      if (!ext.endsWith('.xlsx') && !ext.endsWith('.json') && !ext.endsWith('.pdf')) continue;
       // avoid duplicates by name
       if ([...selected.files].some(e => e.name === f.name)) continue;
       selected.items.add(f);
@@ -412,8 +411,8 @@ def multi():
     if len(files) > 12:
         return render_multi_form("ניתן להעלות עד 12 קבצים בלבד."), 400
     for f in files:
-        if not f.filename.lower().endswith((".xlsx", ".json")):
-            return render_multi_form("יש להעלות קבצי .xlsx או .json בלבד."), 400
+        if not f.filename.lower().endswith((".xlsx", ".json", ".pdf")):
+            return render_multi_form("יש להעלות קבצי .xlsx, .json או .pdf בלבד."), 400
     try:
         months_data = [_parse_upload(f) for f in files]
         return generate_multi_html(months_data)
@@ -426,8 +425,8 @@ def upload():
     f = request.files.get("file")
     if not f or not f.filename:
         return render_form("לא נבחר קובץ."), 400
-    if not f.filename.lower().endswith((".xlsx", ".json")):
-        return render_form("יש להעלות קובץ .xlsx או .json בלבד."), 400
+    if not f.filename.lower().endswith((".xlsx", ".json", ".pdf")):
+        return render_form("יש להעלות קובץ .xlsx, .json או .pdf בלבד."), 400
 
     try:
         data = _parse_upload(f)

@@ -92,12 +92,16 @@ def _normalize_merchant(name: str) -> str:
 
 
 def parse_payments(xlsx_path: Path) -> dict:
-    """Parse a payments Excel file, auto-detecting the issuer format.
+    """Parse a payments file (Excel .xlsx or Cal PDF), auto-detecting format.
 
     Supported layouts:
-      * Cal / בינלאומי הראשון — header row starts with "תאריך עסקה"
-      * Isracard (ישראכרט)    — header row starts with "תאריך רכישה"
+      * Cal / בינלאומי הראשון — header row starts with "תאריך עסקה"  (.xlsx)
+      * Isracard (ישראכרט)    — header row starts with "תאריך רכישה" (.xlsx)
+      * Cal digital PDF       — "דף פירוט דיגיטלי" PDF statement     (.pdf)
     """
+    if xlsx_path.suffix.lower() == ".pdf":
+        return _parse_cal_pdf(xlsx_path)
+
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
@@ -125,6 +129,195 @@ def parse_payments(xlsx_path: Path) -> dict:
         "source": xlsx_path.name,
         "issuer": fmt,
         "payments": payments,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Cal PDF parser
+# ---------------------------------------------------------------------------
+
+_PDF_DATE_EMBEDDED = re.compile(r'^(.*?)(\d{2}/\d{2}/\d{4})$')
+_PDF_DATE_ONLY     = re.compile(r'^\d{2}/\d{2}/\d{4}$')
+_PDF_AMOUNT        = re.compile(r'^-?[\d,]+\.\d{2}$')
+_PDF_HEB           = re.compile(r'[\u05d0-\u05ea]')
+
+# In RTL-sorted word array: for phrase "word1 word2" (word1 on right, word2 on left)
+# → lookup key is rev(word1) + ' ' + rev(word2)
+_PDF_CATS = [
+    ('ירצומ למשח', 'מוצרי חשמל'),
+    ('יאנפ יוליב', 'פנאי בילוי'),
+    ('חוטיב ניפו', 'ביטוח ופינ'),
+    ('בכר רובחתו', 'רכב ותחבור'),
+    ('ןוזמ אקשמו', 'מזון ומשקא'),
+    ('ןוזמ ריהמ',  'מזון מהיר'),
+    ('טוהיר תיבו', 'ריהוט ובית'),
+    ('האופר ירבו', 'רפואה וברי'),
+    ('תרושקת חמו', 'תקשורת ומח'),
+    ('תרושקת',    'תקשורת ומח'),
+    ('יתב ובלכ',  'בתי כלבו'),
+    ('ובלכ יתב',  'בתי כלבו'),
+    ('תודעסמ',    'מסעדות'),
+    ('תודסומ',    'מוסדות'),
+    ('תונוש',     'שונות'),
+    ('היגרנא',    'אנרגיה'),
+    ('הנפוא',     'אופנה'),
+    ('תוריית',    'תיירות'),
+    ('סינניפ',    'פיננסים'),
+    ('ירצומ',     'מוצרי חשמל'),
+    ('זג',        'גז'),
+]
+
+_PDF_STRIP = {
+    'ההזמ', 'סיטרכ', 'Pay', 'Apple', 'אל', 'לא', 'תארוה', 'עבק', 'חמו',
+    'Å', '<', '>', 'ב', 'ן', 'מ',
+}
+_PDF_AD_FRAGS = {
+    'תגצהב', 'הנתומ', 'הצעה', 'הלוואה', 'תיבירב', 'הכומנ', 'רתוי',
+    'קנבהמ', 'הנתומ', 'םיטרפ', 'היצקילפאבו', 'רתאב', 'ףקתו', 'ןיקת',
+}
+
+
+def _pdf_rev(word: str) -> str:
+    """Reverse a reversed-Hebrew word back to readable form; keep non-Hebrew as-is."""
+    return word[::-1] if _PDF_HEB.search(word) else word
+
+
+def _parse_cal_pdf(pdf_path: Path) -> dict:
+    """Parse a Cal credit-card digital PDF statement."""
+    try:
+        import pdfplumber
+    except ImportError:
+        raise ImportError("pdfplumber is required for PDF parsing: pip install pdfplumber")
+
+    all_words: list[dict] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for pg, page in enumerate(pdf.pages):
+            for w in page.extract_words(x_tolerance=4, y_tolerance=3):
+                all_words.append({**w, "abs_top": pg * 10000 + w["top"]})
+
+    # Build row groups anchored on date words
+    anchor_ys: dict[int, list] = {}
+    for w in all_words:
+        m = _PDF_DATE_EMBEDDED.match(w["text"])
+        if m or _PDF_DATE_ONLY.match(w["text"]):
+            anchor_ys.setdefault(round(w["abs_top"]), []).append(w)
+
+    payments: list[dict] = []
+    for anchor_y in sorted(anchor_ys):
+        row_words = [w for w in all_words if abs(w["abs_top"] - anchor_y) <= 5]
+        row_words.sort(key=lambda w: -w["x0"])   # descending x → RTL order
+        texts = [w["text"] for w in row_words]
+
+        # Split fused merchant+date word
+        date_str = None
+        for i, t in enumerate(texts):
+            m = _PDF_DATE_EMBEDDED.match(t)
+            if m:
+                frag, date_str = m.group(1).strip(), m.group(2)
+                texts = texts[:i] + ([frag] if frag else []) + texts[i + 1:]
+                break
+            if _PDF_DATE_ONLY.match(t):
+                date_str = t
+                texts = texts[:i] + texts[i + 1:]
+                break
+        if not date_str:
+            continue
+        d, mo, y = date_str.split("/")
+        if y not in ("2023", "2024", "2025", "2026"):
+            continue
+        date_iso = f"{y}-{mo}-{d}"
+
+        # Amounts: in RTL array the NUMBER is to the LEFT of ₪ (= lower x = higher index)
+        # but appears at index si-1 (lower index in descending sort = higher x = more right)
+        # Actually: ₪ is at x, number is at x+dx (right of ₪ in PDF = higher x = lower index)
+        shek_idxs = [i for i, t in enumerate(texts) if t == "₪"]
+        amounts, amount_idxs = [], set()
+        for si in shek_idxs:
+            if si > 0 and _PDF_AMOUNT.match(texts[si - 1]):
+                amounts.append(float(texts[si - 1].replace(",", "")))
+                amount_idxs.update([si - 1, si])
+        if not amounts:
+            continue
+
+        charge = amounts[-1]   # leftmost in PDF = last found = charge column
+        amount = amounts[0] if len(amounts) > 1 else charge
+
+        # Middle tokens = everything before the first amount/₪
+        first_amt = min(amount_idxs)
+        middle = [t for i, t in enumerate(texts) if i < first_amt]
+        mid_str = " ".join(middle)
+
+        # Skip cashback/discount lines
+        if "החנה עצבמ" in mid_str or "CalExtra" in mid_str:
+            continue
+
+        # Detect type (reversed Hebrew patterns)
+        if charge < 0:
+            ttype = "זיכוי"
+        elif "תארוה עבק" in mid_str:
+            ttype = "הוראת קבע"
+        elif "םולשת" in mid_str or "םימולשת" in mid_str:
+            ttype = "תשלומים"
+        else:
+            ttype = REGULAR_TYPE
+
+        # Detect category
+        category = ""
+        for key, val in _PDF_CATS:
+            if key in mid_str:
+                category = val
+                mid_str = mid_str.replace(key, " ").strip()
+                break
+
+        # Clean merchant
+        mer_tokens = []
+        for t in mid_str.split():
+            if t in _PDF_STRIP or t in _PDF_AD_FRAGS:
+                continue
+            if re.match(r"^\d{3,4}$", t):   # card last 4 digits
+                continue
+            if re.match(r"^\d+$", t):        # installment numbers
+                continue
+            mer_tokens.append(_pdf_rev(t))
+
+        merchant = " ".join(mer_tokens).strip(" -—·.,")
+        merchant = re.sub(r"\s*-?\d[\d,]*\.\d{2}\s*", " ", merchant).strip()
+        merchant = re.sub(r"\b(תשלום|מ)\b", "", merchant).strip()
+        merchant = re.sub(r"\s+", " ", merchant).strip()
+        if not merchant:
+            merchant = "—"
+
+        payments.append({
+            "date": date_iso,
+            "merchant": merchant,
+            "amount": abs(amount),
+            "charge": charge,
+            "type": ttype,
+            "category": category,
+            "notes": "",
+        })
+
+    # Deduplicate (same word rows can appear on adjacent pages)
+    seen: set = set()
+    unique: list[dict] = []
+    for p in payments:
+        k = (p["date"], round(p["charge"], 2), p["merchant"][:12])
+        if k not in seen:
+            seen.add(k)
+            unique.append(p)
+
+    # Normalize canonical names
+    for p in unique:
+        p["canonical"] = _normalize_merchant(p["merchant"])
+
+    # Build a title from the PDF filename
+    title = pdf_path.stem.replace("_", " ")
+
+    return {
+        "title": title,
+        "source": pdf_path.name,
+        "issuer": "cal_pdf",
+        "payments": unique,
     }
 
 
