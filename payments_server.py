@@ -331,19 +331,18 @@ MULTI_FORM = """<!DOCTYPE html>
 <body>
 <div class="card">
   <h1>השוואת חודשים מרובים</h1>
-  <p>העלו בין 2 ל-12 קבצי Excel (.xlsx) או JSON כדי לראות השוואה מלאה בין החודשים.</p>
+  <p>העלו בין 2 ל-12 קבצי Excel (.xlsx), PDF כאל, או JSON כדי לראות השוואה מלאה בין החודשים.</p>
   __ERROR__
-  <form id="form" action="/multi" method="POST" enctype="multipart/form-data">
-    <div class="drop-zone" id="drop">
-      <div class="icon">📂</div>
-      <div class="lbl">גררו קבצים או לחצו לבחירה</div>
-      <div class="sub">.xlsx / .json · עד 12 קבצים</div>
-      <input type="file" name="files" id="files" accept=".xlsx,.json,.pdf" multiple>
-    </div>
-    <div class="file-list" id="file-list"></div>
-    <div class="counter" id="counter"></div>
-    <button type="submit" id="submit" disabled>יצירת השוואה</button>
-  </form>
+  <div id="drop" class="drop-zone">
+    <div class="icon">📂</div>
+    <div class="lbl">גררו קבצים או לחצו לבחירה</div>
+    <div class="sub">.xlsx / .pdf / .json · עד 12 קבצים</div>
+    <input type="file" name="files" id="files" accept=".xlsx,.json,.pdf" multiple>
+  </div>
+  <div class="file-list" id="file-list"></div>
+  <div class="counter" id="counter"></div>
+  <div class="err" id="err-msg" style="display:none;margin-top:12px;"></div>
+  <button type="button" id="submit" disabled onclick="submitFiles()">יצירת השוואה</button>
   <a class="back" href="/">← חזרה</a>
 </div>
 <script>
@@ -355,6 +354,7 @@ MULTI_FORM = """<!DOCTYPE html>
   const listEl   = document.getElementById('file-list');
   const counterEl= document.getElementById('counter');
   const submitEl = document.getElementById('submit');
+  const errEl    = document.getElementById('err-msg');
 
   function refreshUI() {
     const files = [...selected.files];
@@ -365,7 +365,6 @@ MULTI_FORM = """<!DOCTYPE html>
       </div>`).join('');
     counterEl.textContent = files.length ? `${files.length} / ${MAX} קבצים נבחרו` : '';
     submitEl.disabled = files.length < 2;
-    filesEl.files = selected.files;
     listEl.querySelectorAll('button[data-i]').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.i);
@@ -382,11 +381,40 @@ MULTI_FORM = """<!DOCTYPE html>
       if (selected.files.length >= MAX) break;
       const ext = f.name.toLowerCase();
       if (!ext.endsWith('.xlsx') && !ext.endsWith('.json') && !ext.endsWith('.pdf')) continue;
-      // avoid duplicates by name
       if ([...selected.files].some(e => e.name === f.name)) continue;
       selected.items.add(f);
     }
     refreshUI();
+  }
+
+  async function submitFiles() {
+    if (selected.files.length < 2) return;
+    submitEl.disabled = true;
+    submitEl.textContent = 'מעבד...';
+    errEl.style.display = 'none';
+
+    const fd = new FormData();
+    for (const f of selected.files) fd.append('files', f);
+
+    try {
+      const resp = await fetch('/multi', { method: 'POST', body: fd });
+      if (resp.ok) {
+        const html = await resp.text();
+        document.open(); document.write(html); document.close();
+      } else {
+        const text = await resp.text();
+        const m = text.match(/class="err">(.*?)<\/div>/s);
+        errEl.textContent = m ? m[1] : `שגיאה ${resp.status}`;
+        errEl.style.display = 'block';
+        submitEl.disabled = false;
+        submitEl.textContent = 'יצירת השוואה';
+      }
+    } catch(e) {
+      errEl.textContent = 'שגיאת רשת: ' + e.message;
+      errEl.style.display = 'block';
+      submitEl.disabled = false;
+      submitEl.textContent = 'יצירת השוואה';
+    }
   }
 
   filesEl.addEventListener('change', () => { addFiles(filesEl.files); filesEl.value=''; });
@@ -396,9 +424,6 @@ MULTI_FORM = """<!DOCTYPE html>
   dropEl.addEventListener('drop', e => {
     e.preventDefault(); dropEl.classList.remove('drag');
     addFiles(e.dataTransfer.files);
-  });
-  document.getElementById('form').addEventListener('submit', () => {
-    submitEl.disabled = true; submitEl.textContent = 'מעבד...';
   });
 </script>
 </body>
