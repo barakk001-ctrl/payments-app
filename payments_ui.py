@@ -1875,6 +1875,9 @@ MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="section">
   <h2>Top בתי עסק לפי חודש</h2>
+  <input id="mer-search" type="text" placeholder="חיפוש בית עסק..."
+    style="width:100%;padding:8px 12px;margin-bottom:12px;border:1px solid var(--border-strong);
+           border-radius:6px;font-size:14px;font-family:inherit;background:var(--card);color:var(--text);">
   <div class="tbl-wrap"><table id="mer-table"></table></div>
 </div>
 
@@ -1984,9 +1987,11 @@ function renderCatTable(){
 }
 
 // ── Merchant table ──────────────────────────────────────────────────────────
-function renderMerTable(){
-  const months=DATA.months; const mers=DATA.mer_matrix;
-  if(!mers.length){document.getElementById('mer-table').innerHTML='<tr><td class="empty">אין נתונים</td></tr>';return;}
+function renderMerTable(q=''){
+  const months=DATA.months;
+  let mers=DATA.mer_matrix;
+  if(q) mers=mers.filter(m=>m.name.toLowerCase().includes(q.toLowerCase()));
+  if(!mers.length){document.getElementById('mer-table').innerHTML=`<tr><td colspan="${months.length+3}" class="empty">${q?'לא נמצאו תוצאות':'אין נתונים'}</td></tr>`;return;}
   const hdrs=['בית עסק',...months.map(m=>`<th>${esc(m.label)}</th>`),'<th class="grand">סה"כ</th>','<th>מגמה</th>'].join('');
   const rows=mers.map(m=>{
     const cells=m.totals.map(t=>`<td class="num">${t>0?fmt(t):'—'}</td>`).join('');
@@ -2060,6 +2065,10 @@ function renderInsights(){
 // ── Collapsible sections ────────────────────────────────────────────────────
 document.querySelectorAll('.section>h2').forEach(h=>{
   h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
+});
+
+document.getElementById('mer-search').addEventListener('input', e => {
+  renderMerTable(e.target.value.trim());
 });
 
 initTheme();
