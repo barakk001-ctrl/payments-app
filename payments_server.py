@@ -10,10 +10,11 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
+import time
 import uuid
-from collections import OrderedDict
 from pathlib import Path
 
 from flask import Flask, request, redirect
@@ -23,8 +24,36 @@ from payments_ui import parse_payments, generate_html, generate_comparison_html,
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
 
-# In-memory store for multi-month results (max 20 entries)
-_RESULT_CACHE: OrderedDict[str, str] = OrderedDict()
+# Filesystem-based result cache — shared across all gunicorn workers
+_CACHE_DIR = Path(tempfile.gettempdir()) / "payments_results"
+_CACHE_DIR.mkdir(exist_ok=True)
+_CACHE_TTL = 3600  # 1 hour
+
+
+def _cache_write(result_id: str, html: str) -> None:
+    (_CACHE_DIR / f"{result_id}.html").write_text(html, encoding="utf-8")
+
+
+def _cache_read(result_id: str) -> str | None:
+    p = _CACHE_DIR / f"{result_id}.html"
+    if not p.exists():
+        return None
+    # Expire old results
+    if time.time() - p.stat().st_mtime > _CACHE_TTL:
+        p.unlink(missing_ok=True)
+        return None
+    return p.read_text(encoding="utf-8")
+
+
+def _cache_cleanup() -> None:
+    """Remove results older than TTL. Called opportunistically."""
+    try:
+        now = time.time()
+        for p in _CACHE_DIR.glob("*.html"):
+            if now - p.stat().st_mtime > _CACHE_TTL:
+                p.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 UPLOAD_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -462,14 +491,13 @@ def multi():
         month_urls = []
         for d in months_data:
             mid = str(uuid.uuid4())
-            _RESULT_CACHE[mid] = generate_html(d)
+            _cache_write(mid, generate_html(d))
             month_urls.append(f"/multi/result/{mid}")
 
         html = generate_multi_html(months_data, month_urls=month_urls)
         result_id = str(uuid.uuid4())
-        _RESULT_CACHE[result_id] = html
-        if len(_RESULT_CACHE) > 50:
-            _RESULT_CACHE.popitem(last=False)
+        _cache_write(result_id, html)
+        _cache_cleanup()
         return redirect(f"/multi/result/{result_id}")
     except Exception as e:
         return render_multi_form(f"כשל בקריאת הקבצים: {e}"), 400
@@ -477,7 +505,7 @@ def multi():
 
 @app.get("/multi/result/<result_id>")
 def multi_result(result_id: str):
-    html = _RESULT_CACHE.get(result_id)
+    html = _cache_read(result_id)
     if not html:
         return redirect("/multi")
     return html
