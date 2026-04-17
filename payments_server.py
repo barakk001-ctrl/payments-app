@@ -400,7 +400,9 @@ MULTI_FORM = """<!DOCTYPE html>
       const resp = await fetch('/multi', { method: 'POST', body: fd });
       if (resp.ok) {
         const html = await resp.text();
-        const blob = new Blob([html], { type: 'text/html' });
+        const base = `<base href="${window.location.origin}/">`;
+        const htmlWithBase = html.replace('<head>', '<head>' + base);
+        const blob = new Blob([htmlWithBase], { type: 'text/html' });
         window.location.href = URL.createObjectURL(blob);
       } else {
         const text = await resp.text();
