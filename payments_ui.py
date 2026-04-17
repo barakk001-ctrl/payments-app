@@ -1845,14 +1845,22 @@ MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="cards" id="cards"></div>
 
-<div class="section">
-  <h2>הוצאה לפי חודש</h2>
-  <div class="chart-wrap"><canvas id="chart-monthly"></canvas></div>
-</div>
-
-<div class="section">
-  <h2>קטגוריות לפי חודש (מוערם)</h2>
-  <div class="chart-wrap tall"><canvas id="chart-cat-stacked"></canvas></div>
+<div class="section" style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
+  <div style="flex:1;min-width:260px;">
+    <h2 style="font-size:16px;margin:0 0 14px;">חלוקת הוצאות לפי קטגוריה</h2>
+    <div style="position:relative;height:300px;"><canvas id="chart-cat-doughnut"></canvas></div>
+  </div>
+  <div style="flex:1;min-width:220px;">
+    <h2 style="font-size:16px;margin:0 0 14px;">סיכום חודשים</h2>
+    <table id="month-summary-table" style="width:100%;border-collapse:collapse;font-size:14px;">
+      <thead><tr>
+        <th style="text-align:right;padding:6px 8px;border-bottom:2px solid var(--border-strong);font-size:12px;">חודש</th>
+        <th style="text-align:right;padding:6px 8px;border-bottom:2px solid var(--border-strong);font-size:12px;">עסקאות</th>
+        <th style="text-align:right;padding:6px 8px;border-bottom:2px solid var(--border-strong);font-size:12px;">סה"כ (₪)</th>
+      </tr></thead>
+      <tbody id="month-summary-body"></tbody>
+    </table>
+  </div>
 </div>
 
 <div class="section" id="sec-insights">
@@ -1917,35 +1925,46 @@ function renderCharts(){
   const grid=getComputedStyle(document.documentElement).getPropertyValue('--border').trim()||'#eee';
   Chart.defaults.color=text; Chart.defaults.borderColor=grid;
 
-  const labels=DATA.months.map(m=>esc(m.label));
-
-  // Monthly totals bar
-  charts.monthly=new Chart(document.getElementById('chart-monthly'),{
-    type:'bar',
-    data:{labels,datasets:[{data:DATA.months.map(m=>m.total),backgroundColor:'#2196f3',borderRadius:4}]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' ₪'+fmt(ctx.parsed.y)}}},
-      scales:{y:{ticks:{callback:v=>'₪'+fmt0(v),font:{size:10}}},x:{ticks:{font:{size:10}}}},
-    },
-  });
-
-  // Stacked category bar
+  // Category doughnut — aggregate totals across all months
   const cats=DATA.cat_matrix;
-  charts.catStacked=new Chart(document.getElementById('chart-cat-stacked'),{
-    type:'bar',
-    data:{
-      labels,
-      datasets:cats.map((c,i)=>({
-        label:c.name, data:c.totals,
-        backgroundColor:COLORS[i%COLORS.length], stack:'s',
-      })),
-    },
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},
-        tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ₪${fmt0(ctx.parsed.y)}`}}},
-      scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,ticks:{callback:v=>'₪'+fmt0(v),font:{size:10}}}},
-    },
-  });
+  if(cats.length){
+    charts.doughnut=new Chart(document.getElementById('chart-cat-doughnut'),{
+      type:'doughnut',
+      data:{
+        labels:cats.map(c=>c.name),
+        datasets:[{data:cats.map(c=>c.grand),backgroundColor:COLORS.slice(0,cats.length),borderWidth:2}],
+      },
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'right',labels:{boxWidth:13,font:{size:12},padding:10}},
+          tooltip:{callbacks:{label:ctx=>{
+            const pct=Math.round(ctx.parsed/DATA.grand_total*100);
+            return ` ${ctx.label}: ₪${fmt(ctx.parsed)} (${pct}%)`;
+          }}},
+        },
+      },
+    });
+  }
+
+  // Month summary table
+  const tbody=document.getElementById('month-summary-body');
+  if(tbody){
+    const avg=DATA.avg_monthly;
+    tbody.innerHTML=DATA.months.map(m=>{
+      const diff=m.total-avg;
+      const diffStr=diff>=0?`<span style="color:var(--up);font-size:11px;">+₪${fmt0(diff)}</span>`
+                          :`<span style="color:var(--down);font-size:11px;">-₪${fmt0(Math.abs(diff))}</span>`;
+      return `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${esc(m.label)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;">${m.count}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;">₪${fmt(m.total)} ${diffStr}</td>
+      </tr>`;
+    }).join('') + `<tr style="font-weight:700;background:var(--th-bg);">
+      <td style="padding:6px 8px;">סה"כ</td>
+      <td style="padding:6px 8px;">${DATA.months.reduce((s,m)=>s+m.count,0)}</td>
+      <td style="padding:6px 8px;">₪${fmt(DATA.grand_total)}</td>
+    </tr>`;
+  }
 }
 
 // ── Category table ──────────────────────────────────────────────────────────
