@@ -1681,7 +1681,7 @@ def generate_comparison_html(data_a: dict, data_b: dict) -> str:
 # Multi-month comparison (up to 12 files)
 # ---------------------------------------------------------------------------
 
-def build_multi(months_data: list[dict]) -> dict:
+def build_multi(months_data: list[dict], month_urls: list[str] | None = None) -> dict:
     """Build a multi-month comparison payload from a list of parsed payment dicts."""
 
     # Sort months by their earliest transaction date
@@ -1689,7 +1689,13 @@ def build_multi(months_data: list[dict]) -> dict:
         dates = [p["date"] for p in d["payments"] if p["date"]]
         return min(dates) if dates else d.get("source", "")
 
-    months_data = sorted(months_data, key=_month_key)
+    # Sort both months_data and month_urls together
+    if month_urls and len(month_urls) == len(months_data):
+        paired = sorted(zip(months_data, month_urls), key=lambda x: _month_key(x[0]))
+        months_data, month_urls = [p[0] for p in paired], [p[1] for p in paired]
+    else:
+        months_data = sorted(months_data, key=_month_key)
+        month_urls = None
 
     months = []
     all_cat_names: set = set()
@@ -1712,6 +1718,7 @@ def build_multi(months_data: list[dict]) -> dict:
             "count": len(pays),
             "cat": {k: round(v, 2) for k, v in cat_totals.items()},
             "mer": {k: round(v, 2) for k, v in mer_totals.items()},
+            "url": month_urls[len(months)] if month_urls else "",
         })
 
     # Top categories by total across all months
@@ -1959,8 +1966,13 @@ function renderCharts(){
       const diff=m.total-avg;
       const diffStr=diff>=0?`<span style="color:var(--up);font-size:11px;">+₪${fmt0(diff)}</span>`
                           :`<span style="color:var(--down);font-size:11px;">-₪${fmt0(Math.abs(diff))}</span>`;
-      return `<tr>
-        <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${esc(m.label)}</td>
+      const labelCell=m.url
+        ? `<a href="${m.url}" target="_blank" style="color:var(--primary);text-decoration:none;font-weight:600;display:flex;align-items:center;gap:5px;">
+             ${esc(m.label)} <span style="font-size:10px;opacity:0.7;">↗</span>
+           </a>`
+        : esc(m.label);
+      return `<tr style="${m.url?'cursor:pointer;':''}">
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${labelCell}</td>
         <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;">${m.count}</td>
         <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;">₪${fmt(m.total)} ${diffStr}</td>
       </tr>`;
@@ -2183,8 +2195,8 @@ renderMerTable();
 """
 
 
-def generate_multi_html(months_data: list[dict]) -> str:
-    payload = build_multi(months_data)
+def generate_multi_html(months_data: list[dict], month_urls: list[str] | None = None) -> str:
+    payload = build_multi(months_data, month_urls=month_urls)
     return MULTI_HTML_TEMPLATE.replace("__DATA__", json.dumps(payload, ensure_ascii=False))
 
 

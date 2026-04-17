@@ -457,11 +457,18 @@ def multi():
             return render_multi_form("יש להעלות קבצי .xlsx, .json או .pdf בלבד."), 400
     try:
         months_data = [_parse_upload(f) for f in files]
-        html = generate_multi_html(months_data)
-        # Store result with a UUID so the browser gets a real URL it can navigate from
+
+        # Cache individual month dashboards so they can be opened in a new tab
+        month_urls = []
+        for d in months_data:
+            mid = str(uuid.uuid4())
+            _RESULT_CACHE[mid] = generate_html(d)
+            month_urls.append(f"/multi/result/{mid}")
+
+        html = generate_multi_html(months_data, month_urls=month_urls)
         result_id = str(uuid.uuid4())
         _RESULT_CACHE[result_id] = html
-        if len(_RESULT_CACHE) > 20:          # keep last 20 results only
+        if len(_RESULT_CACHE) > 50:
             _RESULT_CACHE.popitem(last=False)
         return redirect(f"/multi/result/{result_id}")
     except Exception as e:
