@@ -527,6 +527,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   <h2>כל התנועות</h2>
   <div class="filter">
     <input id="search" type="text" placeholder="חיפוש תיאור...">
+    <input id="month-filter" type="month" title="סינון לפי חודש">
     <input id="date-from" type="date" title="מתאריך">
     <input id="date-to" type="date" title="עד תאריך">
     <select id="dir-filter">
@@ -537,6 +538,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
       <option value="internal">פנימי (פק קרן)</option>
     </select>
     <select id="cat-filter"><option value="">כל הקטגוריות</option></select>
+    <button id="clear-filters" class="btn" style="height:34px;font-size:12px;">✕ נקה</button>
   </div>
   <div class="tbl-wrap">
     <table id="all-table">
@@ -761,8 +763,16 @@ function renderAll(){
   const q=document.getElementById('search').value.trim().toLowerCase();
   const df=document.getElementById('dir-filter').value;
   const cf=document.getElementById('cat-filter').value;
-  const dateFrom=document.getElementById('date-from').value;
-  const dateTo=document.getElementById('date-to').value;
+  const month=document.getElementById('month-filter').value;   // "YYYY-MM" or ""
+  const dateFrom=month ? month+'-01' : document.getElementById('date-from').value;
+  const dateTo  =month ? month+'-31' : document.getElementById('date-to').value;
+
+  // grey out date-from/to when month is active
+  const locked=!!month;
+  document.getElementById('date-from').disabled=locked;
+  document.getElementById('date-to').disabled=locked;
+  document.getElementById('date-from').style.opacity=locked?'0.4':'1';
+  document.getElementById('date-to').style.opacity=locked?'0.4':'1';
 
   let rows=DATA.transactions.filter(t=>{
     if(q && !t.desc.toLowerCase().includes(q)) return false;
@@ -875,8 +885,18 @@ document.querySelectorAll('.section>h2').forEach(h=>{
   h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
 });
 
-['search','dir-filter','cat-filter','date-from','date-to'].forEach(id=>
+['search','dir-filter','cat-filter','date-from','date-to','month-filter'].forEach(id=>
   document.getElementById(id).addEventListener('input',renderAll));
+
+document.getElementById('clear-filters').addEventListener('click',()=>{
+  document.getElementById('search').value='';
+  document.getElementById('month-filter').value='';
+  document.getElementById('date-from').value='';
+  document.getElementById('date-to').value='';
+  document.getElementById('dir-filter').value='';
+  document.getElementById('cat-filter').value='';
+  renderAll();
+});
 
 initTheme();
 renderCards();
