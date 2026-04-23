@@ -271,18 +271,14 @@ def parse_bank_statement(path: Path) -> dict:
         if t['direction'] == 'savings' and t['credit'] > 0 and t['debit'] == 0:
             t['direction'] = 'internal'
 
-    # Savings = most recent deposit balance per deposit account.
-    # Each deposit account (identified by the number in the description e.g. "301-00019")
-    # has its balance grow over time as money is redeemed and redeposited with more.
-    # We take the LAST פקדון debit per account = the current balance locked in savings.
-    _dep_re = re.compile(r'(\d{3}-\d{5})')
-    _last_deposit: dict[str, float] = {}
+    # Savings = the most recent פקדון (deposit) transaction amount.
+    # The user rolls deposits: redeem → add money → redeposit with new total.
+    # The last פקדון debit is the current deposit balance.
+    _last_deposit_amount = 0.0
     for t in sorted(transactions, key=lambda x: x['date']):
-        if t['direction'] == 'savings' and t['debit'] > 0:
-            m = _dep_re.search(t['desc'])
-            key = m.group(1) if m else 'default'
-            _last_deposit[key] = t['debit']
-    current_savings = round(sum(_last_deposit.values()), 2)
+        if t['direction'] == 'savings' and t['debit'] > 0 and 'פקדון' in t['desc']:
+            _last_deposit_amount = t['debit']
+    current_savings = round(_last_deposit_amount, 2)
 
     # Monthly summaries — savings column shows net new money added each month
     # (new deposit debit minus previous deposit debit for that account)
