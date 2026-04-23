@@ -77,9 +77,9 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 .subline{font-size:13px;color:#85B7EB;margin-bottom:18px;}
 .err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
 .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
-.feat{border-radius:12px;padding:14px 16px;cursor:pointer;border:2px solid transparent;transition:border-color .15s,opacity .15s;}
-.feat:hover{border-color:rgba(255,255,255,.25);}
-.feat.active{border-color:rgba(255,255,255,.5);}
+.feat{border-radius:12px;padding:14px 16px;cursor:pointer;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s;}
+.feat:hover{outline-color:rgba(255,255,255,.25);}
+.feat.active{outline-color:rgba(255,255,255,.5);}
 .feat.blue{background:#185FA5;}
 .feat.teal{background:#0F6E56;}
 .feat.purple{background:#534AB7;}
@@ -242,7 +242,10 @@ drop.addEventListener('drop', e => {
   e.preventDefault(); drop.classList.remove('drag');
   if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; update(); }
 });
-form.addEventListener('submit', () => { submit.disabled = true; submit.textContent = 'מעבד...'; });
+form.addEventListener('submit', e => {
+  if (curMode === 'multi') { e.preventDefault(); window.location.href = '/multi'; return; }
+  submit.disabled = true; submit.textContent = 'מעבד...';
+});
 </script>
 </body>
 </html>
