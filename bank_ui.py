@@ -265,6 +265,13 @@ def parse_bank_statement(path: Path) -> dict:
 
     transactions = raw['transactions']
 
+    # Mark credit-side savings (deposit redemptions like פק קרן) as 'internal'
+    # so they don't inflate or deflate any totals — they're just your own money returning.
+    # Only debit-side savings (new money going into deposits) count as savings outflow.
+    for t in transactions:
+        if t['direction'] == 'savings' and t['credit'] > 0 and t['debit'] == 0:
+            t['direction'] = 'internal'
+
     # Monthly summaries
     monthly: dict = defaultdict(lambda: {'income': 0.0, 'expense': 0.0, 'savings': 0.0, 'count': 0})
     for t in transactions:
@@ -274,7 +281,7 @@ def parse_bank_statement(path: Path) -> dict:
         elif t['direction'] == 'expense':
             monthly[ym]['expense'] += t['debit']
         elif t['direction'] == 'savings':
-            monthly[ym]['savings'] += t['debit'] - t['credit']
+            monthly[ym]['savings'] += t['debit']
         monthly[ym]['count'] += 1
 
     months = sorted([
@@ -304,7 +311,7 @@ def parse_bank_statement(path: Path) -> dict:
 
     total_income  = round(sum(t['credit'] for t in transactions if t['direction'] == 'income'),  2)
     total_expense = round(sum(t['debit']  for t in transactions if t['direction'] == 'expense'), 2)
-    total_savings = round(sum(t['debit'] - t['credit'] for t in transactions if t['direction'] == 'savings'), 2)
+    total_savings = round(sum(t['debit']  for t in transactions if t['direction'] == 'savings'), 2)
 
     # Balance trend (only rows with a balance value)
     balance_trend = [
@@ -427,6 +434,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .badge-income{background:var(--income-bg);color:var(--income);}
   .badge-expense{background:var(--expense-bg);color:var(--expense);}
   .badge-savings{background:var(--savings-bg);color:var(--savings);}
+  .badge-internal{background:var(--th-bg);color:var(--muted);}
   .sum-row td{border-top:2px solid var(--border-strong);border-bottom:none;font-weight:700;background:var(--th-bg);}
   .empty{color:var(--soft);font-style:italic;padding:8px 0;}
   .insights-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;}
@@ -503,6 +511,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
       <option value="income">הכנסות</option>
       <option value="expense">הוצאות</option>
       <option value="savings">פיקדונות</option>
+      <option value="internal">פנימי (פק קרן)</option>
     </select>
     <select id="cat-filter"><option value="">כל הקטגוריות</option></select>
   </div>
