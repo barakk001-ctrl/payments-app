@@ -605,8 +605,8 @@ document.getElementById('sub').textContent=`מקור: ${esc(DATA.source)}`;
 // ── Override storage (persisted to localStorage) ───────────────────────────
 const STORAGE_KEY='bank-overrides-'+DATA.source;
 let overrides={};
-try{overrides=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');}catch(e){}
-function saveOverrides(){localStorage.setItem(STORAGE_KEY,JSON.stringify(overrides));}
+try{overrides=window.__SAVED_OVERRIDES__||JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');}catch(e){}
+function saveOverrides(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(overrides));}catch(e){}}
 function effDir(t,idx){return overrides[idx]||t.direction;}
 function calcTotals(){
   let income=0,expense=0,external=0;
@@ -937,14 +937,12 @@ function renderInsights(){
 
 // ── Save HTML ─────────────────────────────────────────────────────────────
 document.getElementById('btn-save').addEventListener('click',()=>{
-  // Bake the current overrides into the saved file so it opens with all manual changes intact
-  let html='<!DOCTYPE html>'+document.documentElement.outerHTML;
   const overridesJson=JSON.stringify(overrides);
-  // Replace the empty/loaded overrides init with the current snapshot
-  html=html.replace(
-    /let overrides=\{[^}]*\};\s*try\{overrides=JSON\.parse[^}]+\}catch\(e\)\{\}/,
-    `let overrides=${overridesJson};`
-  );
+  let html='<!DOCTYPE html>'+document.documentElement.outerHTML;
+  // Inject a script that pre-sets __SAVED_OVERRIDES__ before the main script reads localStorage.
+  // This makes the saved file work even when localStorage is unavailable (e.g. file:// origin).
+  const inject=`<script>window.__SAVED_OVERRIDES__=${overridesJson};<\/script>`;
+  html=html.replace('<head>','<head>'+inject);
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`bank_${DATA.source.replace(/\.[^.]+$/,'')}.html`;
