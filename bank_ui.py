@@ -527,6 +527,8 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   <h2>כל התנועות</h2>
   <div class="filter">
     <input id="search" type="text" placeholder="חיפוש תיאור...">
+    <input id="date-from" type="date" title="מתאריך">
+    <input id="date-to" type="date" title="עד תאריך">
     <select id="dir-filter">
       <option value="">כל הכיוונים</option>
       <option value="income">הכנסות</option>
@@ -759,11 +761,15 @@ function renderAll(){
   const q=document.getElementById('search').value.trim().toLowerCase();
   const df=document.getElementById('dir-filter').value;
   const cf=document.getElementById('cat-filter').value;
+  const dateFrom=document.getElementById('date-from').value;
+  const dateTo=document.getElementById('date-to').value;
 
   let rows=DATA.transactions.filter(t=>{
     if(q && !t.desc.toLowerCase().includes(q)) return false;
     if(df && t.direction!==df) return false;
     if(cf && t.category!==cf) return false;
+    if(dateFrom && t.date < dateFrom) return false;
+    if(dateTo   && t.date > dateTo)   return false;
     return true;
   });
 
@@ -869,7 +875,7 @@ document.querySelectorAll('.section>h2').forEach(h=>{
   h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
 });
 
-['search','dir-filter','cat-filter'].forEach(id=>
+['search','dir-filter','cat-filter','date-from','date-to'].forEach(id=>
   document.getElementById(id).addEventListener('input',renderAll));
 
 initTheme();
