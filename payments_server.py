@@ -60,82 +60,181 @@ UPLOAD_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>Payments UI — העלאת קובץ</title>
+<title>Payments — ניתוח הוצאות</title>
 <style>
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f5f5f7;
-         color: #222; display: flex; align-items: center; justify-content: center;
-         min-height: 100vh; margin: 0; padding: 20px; }
-  .card { background: #fff; padding: 32px 36px; border-radius: 12px;
-          box-shadow: 0 2px 16px rgba(0,0,0,0.08); max-width: 460px; width: 100%; }
-  h1 { font-size: 20px; margin: 0 0 6px; }
-  p  { color: #666; font-size: 14px; margin: 0 0 22px; }
-  .drop { display: block; border: 2px dashed #ccc; border-radius: 8px;
-          padding: 36px 16px; text-align: center; cursor: pointer;
-          transition: all 0.15s; background: #fafafa; }
-  .drop:hover, .drop.drag { border-color: #2196f3; background: #e3f2fd; }
-  .drop input { display: none; }
-  .drop .icon  { font-size: 36px; line-height: 1; margin-bottom: 10px; }
-  .drop .label { font-size: 14px; color: #444; }
-  .drop .sub   { font-size: 12px; color: #888; margin-top: 4px; }
-  .filename { margin-top: 10px; font-size: 13px; color: #1976d2; text-align: center; min-height: 18px; }
-  button { margin-top: 14px; width: 100%; padding: 12px; background: #2196f3; color: #fff;
-           border: 0; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
-  button:hover:not(:disabled) { background: #1976d2; }
-  button:disabled { background: #ccc; cursor: not-allowed; }
-  .err { background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 6px;
-         font-size: 13px; margin-bottom: 14px; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:480px;width:100%;}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:32px;height:32px;background:#378ADD;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+.logo-icon svg{width:16px;height:16px;stroke:#E6F1FB;fill:none;stroke-width:2;}
+.logo-name{font-size:16px;font-weight:600;color:#E6F1FB;}
+.logo-sub{font-size:11px;color:#85B7EB;margin-top:1px;}
+.ver{background:#185FA5;color:#B5D4F4;font-size:11px;padding:4px 10px;border-radius:20px;}
+.headline{font-size:19px;font-weight:600;color:#E6F1FB;margin-bottom:3px;}
+.subline{font-size:13px;color:#85B7EB;margin-bottom:18px;}
+.err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+.feat{border-radius:12px;padding:14px 16px;cursor:pointer;border:2px solid transparent;transition:border-color .15s,opacity .15s;}
+.feat:hover{border-color:rgba(255,255,255,.25);}
+.feat.active{border-color:rgba(255,255,255,.5);}
+.feat.blue{background:#185FA5;}
+.feat.teal{background:#0F6E56;}
+.feat.purple{background:#534AB7;}
+.feat.coral{background:#993C1D;}
+.feat-icon{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;margin-bottom:9px;}
+.feat.blue .feat-icon{background:#378ADD;}
+.feat.teal .feat-icon{background:#1D9E75;}
+.feat.purple .feat-icon{background:#7F77DD;}
+.feat.coral .feat-icon{background:#D85A30;}
+.feat-icon svg{width:15px;height:15px;fill:none;stroke-width:1.8;}
+.feat.blue .feat-icon svg{stroke:#E6F1FB;}
+.feat.teal .feat-icon svg{stroke:#E1F5EE;}
+.feat.purple .feat-icon svg{stroke:#EEEDFE;}
+.feat.coral .feat-icon svg{stroke:#FAECE7;}
+.feat-name{font-size:12px;font-weight:600;color:#E6F1FB;margin-bottom:2px;}
+.feat.blue .feat-hint{color:#85B7EB;}
+.feat.teal .feat-hint{color:#9FE1CB;}
+.feat.purple .feat-hint{color:#AFA9EC;}
+.feat.coral .feat-hint{color:#F5C4B3;}
+.feat-hint{font-size:11px;}
+.drop-zone{background:#042C53;border:1.5px dashed #378ADD;border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:border-color .15s;}
+.drop-zone.drag,.drop-zone:hover{border-color:#85B7EB;}
+.drop-zone input{display:none;}
+.drop-icon{width:38px;height:38px;background:#0C447C;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;}
+.drop-icon svg{width:17px;height:17px;fill:none;stroke:#378ADD;stroke-width:1.8;}
+.drop-title{font-size:13px;font-weight:600;color:#B5D4F4;margin-bottom:3px;}
+.drop-hint{font-size:11px;color:#378ADD;}
+.fname{font-size:12px;color:#9FE1CB;margin-top:8px;min-height:16px;}
+.pills{display:flex;justify-content:center;gap:6px;margin-top:10px;}
+.pill{background:#0C447C;color:#85B7EB;font-size:11px;padding:3px 9px;border-radius:20px;}
+.footer{display:flex;justify-content:space-between;align-items:center;margin-top:14px;}
+.submit-btn{background:#378ADD;color:#042C53;font-size:14px;font-weight:700;padding:10px 24px;
+            border:none;border-radius:8px;cursor:pointer;transition:background .15s;}
+.submit-btn:hover:not(:disabled){background:#85B7EB;}
+.submit-btn:disabled{background:#185FA5;color:#378ADD;cursor:not-allowed;}
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>העלאת קובץ עסקאות</h1>
-    <p>בחרו קובץ Excel (.xlsx), PDF של פירוט כאל, או JSON שנשמר קודם — כדי לייצר תצוגה אינטראקטיבית.</p>
-    __ERROR__
-    <form id="form" action="/upload" method="POST" enctype="multipart/form-data">
-      <label class="drop" id="drop">
-        <div class="icon">📄</div>
-        <div class="label">גררו קובץ או לחצו לבחירה</div>
-        <div class="sub">.xlsx / .json / .pdf · עד 16MB</div>
-        <input type="file" name="file" id="file" accept=".xlsx,.json,.pdf" required>
-      </label>
-      <div class="filename" id="filename"></div>
-      <button type="submit" id="submit" disabled>יצירת תצוגה</button>
-    </form>
-    <div style="text-align:center;margin-top:16px;font-size:13px;display:flex;flex-direction:column;gap:8px;">
-      <a href="/compare" style="color:#2196f3;text-decoration:none;">השוואה בין שני חודשים →</a>
-      <a href="/multi" style="color:#2196f3;text-decoration:none;">השוואת עד 12 חודשים →</a>
-      <a href="/bank" style="color:#2196f3;text-decoration:none;">📊 ניתוח תנועות בנק (הכנסות vs הוצאות) →</a>
+<div class="page">
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      </div>
+      <div>
+        <div class="logo-name">Payments</div>
+        <div class="logo-sub">ניתוח הוצאות</div>
+      </div>
+    </div>
+    <div class="ver">v2.0</div>
+  </div>
+
+  <div class="headline">מה תרצה לנתח?</div>
+  <div class="subline">בחר סוג ניתוח, גרור קובץ והתוצאות יוצגו מיד</div>
+
+  __ERROR__
+
+  <div class="cards">
+    <div class="feat blue active" data-mode="credit" onclick="setMode(this,'credit','/upload','file','.xlsx,.json,.pdf')">
+      <div class="feat-icon">
+        <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+      </div>
+      <div class="feat-name">כרטיס אשראי</div>
+      <div class="feat-hint">Cal · Isracard · xlsx · pdf</div>
+    </div>
+    <div class="feat teal" data-mode="bank" onclick="setMode(this,'bank','/bank','bank-file','.xls,.xlsx,.pdf')">
+      <div class="feat-icon">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </div>
+      <div class="feat-name">תנועות בנק</div>
+      <div class="feat-hint">Fibi · xls · pdf</div>
+    </div>
+    <div class="feat purple" data-mode="multi" onclick="setMode(this,'multi',null,null,null)">
+      <div class="feat-icon">
+        <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+      </div>
+      <div class="feat-name">השוואת חודשים</div>
+      <div class="feat-hint">עד 12 חודשים</div>
+    </div>
+    <div class="feat coral" data-mode="compare" onclick="setMode(this,'compare','/compare','cmp-file','.xlsx,.json,.pdf')">
+      <div class="feat-icon">
+        <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+      </div>
+      <div class="feat-name">השוואת 2 חודשים</div>
+      <div class="feat-hint">לפני / אחרי</div>
     </div>
   </div>
-<script>
-  const drop = document.getElementById('drop');
-  const file = document.getElementById('file');
-  const name = document.getElementById('filename');
-  const submit = document.getElementById('submit');
-  const form = document.getElementById('form');
 
-  function update() {
-    if (file.files.length) {
-      name.textContent = file.files[0].name;
-      submit.disabled = false;
-    }
+  <form id="main-form" action="/upload" method="POST" enctype="multipart/form-data">
+    <label class="drop-zone" id="drop" for="file-input">
+      <input type="file" id="file-input" name="file" accept=".xlsx,.json,.pdf" required>
+      <div class="drop-icon">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+      </div>
+      <div class="drop-title">גרור קובץ לכאן</div>
+      <div class="drop-hint">או לחץ לבחירה מהמחשב</div>
+      <div class="fname" id="fname"></div>
+      <div class="pills" id="pills">
+        <span class="pill">xlsx</span><span class="pill">pdf</span>
+        <span class="pill">json</span>
+      </div>
+    </label>
+
+    <div class="footer">
+      <span style="font-size:12px;color:#85B7EB;" id="mode-label">כרטיס אשראי — פירוט חודשי</span>
+      <button type="submit" id="submit" disabled class="submit-btn">העלה קובץ</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const modes = {
+  credit:  {action:'/upload', accept:'.xlsx,.json,.pdf', label:'כרטיס אשראי — פירוט חודשי',  pills:['xlsx','pdf','json']},
+  bank:    {action:'/bank',   accept:'.xls,.xlsx,.pdf',  label:'תנועות בנק — הכנסות vs הוצאות', pills:['xls','pdf']},
+  multi:   {action:'/multi',  accept:'.xlsx,.json,.pdf', label:'השוואת עד 12 חודשים',         pills:['xlsx','pdf','json'], multi:true},
+  compare: {action:'/compare',accept:'.xlsx,.json,.pdf', label:'השוואת 2 חודשים',              pills:['xlsx','pdf','json']},
+};
+let curMode = 'credit';
+const form = document.getElementById('main-form');
+const fileInput = document.getElementById('file-input');
+const drop = document.getElementById('drop');
+const fname = document.getElementById('fname');
+const submit = document.getElementById('submit');
+const pillsEl = document.getElementById('pills');
+const modeLabel = document.getElementById('mode-label');
+
+function setMode(el, mode) {
+  document.querySelectorAll('.feat').forEach(f => f.classList.remove('active'));
+  el.classList.add('active');
+  curMode = mode;
+  const m = modes[mode];
+  form.action = m.action;
+  fileInput.accept = m.accept;
+  fileInput.value = '';
+  fname.textContent = '';
+  submit.disabled = true;
+  modeLabel.textContent = m.label;
+  pillsEl.innerHTML = m.pills.map(p => `<span class="pill">${p}</span>`).join('');
+  if (mode === 'multi') window.location.href = '/multi';
+}
+
+function update() {
+  if (fileInput.files.length) {
+    fname.textContent = fileInput.files[0].name;
+    submit.disabled = false;
   }
-  file.addEventListener('change', update);
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
-  drop.addEventListener('drop', e => {
-    e.preventDefault();
-    drop.classList.remove('drag');
-    if (e.dataTransfer.files.length) {
-      file.files = e.dataTransfer.files;
-      update();
-    }
-  });
-  form.addEventListener('submit', () => {
-    submit.disabled = true;
-    submit.textContent = 'מעבד...';
-  });
+}
+fileInput.addEventListener('change', update);
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('drag');
+  if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; update(); }
+});
+form.addEventListener('submit', () => { submit.disabled = true; submit.textContent = 'מעבד...'; });
 </script>
 </body>
 </html>
