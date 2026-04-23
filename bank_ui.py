@@ -444,8 +444,27 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .badge-expense{background:var(--expense-bg);color:var(--expense);}
   .badge-savings{background:var(--savings-bg);color:var(--savings);}
   .badge-internal{background:var(--th-bg);color:var(--muted);}
-  .sum-row td{border-top:2px solid var(--border-strong);border-bottom:none;font-weight:700;background:var(--th-bg);}
-  .empty{color:var(--soft);font-style:italic;padding:8px 0;}
+  .chk-col{width:32px;text-align:center !important;padding:6px 4px !important;}
+  .chk-col input{width:16px;height:16px;cursor:pointer;accent-color:var(--primary);}
+  .floating-bar{position:fixed;bottom:-120px;left:50%;transform:translateX(-50%);
+    background:var(--card);border:1px solid var(--border-strong);box-shadow:0 -4px 24px rgba(0,0,0,.18);
+    border-radius:14px;padding:12px 24px;display:flex;flex-direction:column;gap:0;
+    font-size:15px;font-weight:600;z-index:100;transition:bottom .3s ease;
+    min-width:300px;max-width:500px;width:90%;}
+  .floating-bar.visible{bottom:24px;}
+  .floating-bar .bar-top{display:flex;align-items:center;gap:16px;white-space:nowrap;flex-wrap:wrap;}
+  .floating-bar .sel-total-income{color:var(--income);}
+  .floating-bar .sel-total-expense{color:var(--expense);}
+  .floating-bar .bar-btn{background:none;border:1px solid var(--border-strong);color:var(--muted);
+    padding:4px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;}
+  .floating-bar .bar-btn:hover{background:var(--hover);color:var(--text);}
+  .floating-bar .sel-items{margin-top:8px;border-top:1px solid var(--border);padding-top:6px;
+    max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+  .floating-bar .sel-item{display:flex;justify-content:space-between;padding:3px 2px;
+    font-size:13px;font-weight:400;border-bottom:1px solid var(--border);}
+  .floating-bar .sel-item:last-child{border-bottom:none;}
+  .floating-bar .item-label{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;}
+  .floating-bar .item-amount{font-weight:600;white-space:nowrap;padding-right:12px;}
   .insights-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;}
   .ic{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:8px;
       border-right:4px solid transparent;background:var(--bg);font-size:14px;line-height:1.5;}
@@ -498,7 +517,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="section">
   <h2>Top מקורות הכנסה</h2>
   <table id="income-table">
-    <thead><tr><th>תיאור</th><th>סה"כ (₪)</th></tr></thead>
+    <thead><tr><th class="chk-col"><input type="checkbox" class="select-all" data-table="income-table"></th><th>תיאור</th><th>סה"כ (₪)</th></tr></thead>
     <tbody id="income-tbody"></tbody>
   </table>
 </div>
@@ -506,7 +525,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="section">
   <h2>Top יעדי הוצאה</h2>
   <table id="expense-table">
-    <thead><tr><th>תיאור</th><th>סה"כ (₪)</th></tr></thead>
+    <thead><tr><th class="chk-col"><input type="checkbox" class="select-all" data-table="expense-table"></th><th>תיאור</th><th>סה"כ (₪)</th></tr></thead>
     <tbody id="expense-tbody"></tbody>
   </table>
 </div>
@@ -532,6 +551,16 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
       <tbody id="all-tbody"></tbody>
     </table>
   </div>
+</div>
+
+<div class="floating-bar" id="floating-bar">
+  <div class="bar-top">
+    <span id="sel-summary"></span>
+    <span id="sel-total-income" class="sel-total-income"></span>
+    <span id="sel-total-expense" class="sel-total-expense"></span>
+    <button class="bar-btn" id="sel-clear">נקה בחירה</button>
+  </div>
+  <div class="sel-items" id="sel-items"></div>
 </div>
 
 <script>
@@ -660,11 +689,71 @@ function renderMonthly(){
 
 // ── Top income / expense tables ────────────────────────────────────────────
 function renderTopTables(){
+  const incomeTotal=DATA.top_income.reduce((s,t)=>s+t.total,0);
   document.getElementById('income-tbody').innerHTML=
-    DATA.top_income.map(t=>`<tr><td>${esc(t.name)}</td><td class="num credit">${fmt(t.total)}</td></tr>`).join('');
+    DATA.top_income.map(t=>`<tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${t.total}" data-type="income" data-label="${esc(t.name)}"></td>
+      <td>${esc(t.name)}</td>
+      <td class="num credit">${fmt(t.total)}</td>
+    </tr>`).join('') +
+    `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num credit">${fmt(incomeTotal)}</td></tr>`;
+
+  const expenseTotal=DATA.top_expense.reduce((s,t)=>s+t.total,0);
   document.getElementById('expense-tbody').innerHTML=
-    DATA.top_expense.map(t=>`<tr><td>${esc(t.name)}</td><td class="num debit">${fmt(t.total)}</td></tr>`).join('');
+    DATA.top_expense.map(t=>`<tr>
+      <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${t.total}" data-type="expense" data-label="${esc(t.name)}"></td>
+      <td>${esc(t.name)}</td>
+      <td class="num debit">${fmt(t.total)}</td>
+    </tr>`).join('') +
+    `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num debit">${fmt(expenseTotal)}</td></tr>`;
 }
+
+// ── Floating bar ───────────────────────────────────────────────────────────
+function updateFloatingBar(){
+  const checked=[...document.querySelectorAll('.row-chk:checked')];
+  const bar=document.getElementById('floating-bar');
+  if(!checked.length){bar.classList.remove('visible');return;}
+
+  const incomeItems=checked.filter(cb=>cb.dataset.type==='income');
+  const expenseItems=checked.filter(cb=>cb.dataset.type==='expense');
+  const incomeSum=incomeItems.reduce((s,cb)=>s+parseFloat(cb.dataset.amount||0),0);
+  const expenseSum=expenseItems.reduce((s,cb)=>s+parseFloat(cb.dataset.amount||0),0);
+
+  document.getElementById('sel-summary').textContent=`נבחרו ${checked.length} פריטים`;
+  document.getElementById('sel-total-income').textContent=incomeItems.length?`הכנסות: +₪${fmt(incomeSum)}`:'';
+  document.getElementById('sel-total-expense').textContent=expenseItems.length?`הוצאות: -₪${fmt(expenseSum)}`:'';
+
+  document.getElementById('sel-items').innerHTML=checked.map(cb=>{
+    const isIncome=cb.dataset.type==='income';
+    const cls=isIncome?'credit':'debit';
+    const sign=isIncome?'+':'-';
+    return `<div class="sel-item">
+      <span class="item-label">${esc(cb.dataset.label||'')}</span>
+      <span class="item-amount ${cls}">${sign}₪${fmt(parseFloat(cb.dataset.amount||0))}</span>
+    </div>`;
+  }).join('');
+
+  bar.classList.add('visible');
+}
+
+document.addEventListener('change',e=>{
+  if(e.target.classList.contains('row-chk')){
+    const table=e.target.closest('table');
+    const sa=table.querySelector('.select-all');
+    if(sa) sa.checked=[...table.querySelectorAll('tbody .row-chk')].every(cb=>cb.checked);
+    updateFloatingBar();
+  }
+  if(e.target.classList.contains('select-all')){
+    const table=e.target.closest('table');
+    table.querySelectorAll('tbody .row-chk').forEach(cb=>{cb.checked=e.target.checked;});
+    updateFloatingBar();
+  }
+});
+
+document.getElementById('sel-clear').addEventListener('click',()=>{
+  document.querySelectorAll('.row-chk:checked,.select-all').forEach(cb=>{cb.checked=false;});
+  updateFloatingBar();
+});
 
 // ── All transactions table ─────────────────────────────────────────────────
 function initFilters(){
