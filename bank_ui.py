@@ -440,6 +440,15 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .badge-expense{background:var(--expense-bg);color:var(--expense);}
   .badge-savings{background:var(--savings-bg);color:var(--savings);}
   .badge-internal{background:var(--th-bg);color:var(--muted);}
+  .badge-external{background:#fff8e1;color:#e65100;font-weight:700;}
+  [data-theme="dark"] .badge-external{background:#3e2a00;color:#ffb74d;}
+  .override-btn{background:none;border:1px solid var(--border-strong);border-radius:5px;
+    padding:2px 8px;font-size:11px;cursor:pointer;color:var(--muted);font-family:inherit;
+    white-space:nowrap;transition:all .15s;}
+  .override-btn:hover{border-color:var(--primary);color:var(--primary);}
+  .override-btn.is-external{background:#fff8e1;border-color:#e65100;color:#e65100;font-weight:600;}
+  [data-theme="dark"] .override-btn.is-external{background:#3e2a00;border-color:#ffb74d;color:#ffb74d;}
+  .card.external-card{border-color:#e65100;}
   .chk-col{width:32px;text-align:center !important;padding:6px 4px !important;}
   .chk-col input{width:16px;height:16px;cursor:pointer;accent-color:var(--primary);}
   .floating-bar{position:fixed;bottom:-120px;left:50%;transform:translateX(-50%);
@@ -539,6 +548,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
       <option value="expense">הוצאות</option>
       <option value="savings">פיקדונות</option>
       <option value="internal">פנימי (פק קרן)</option>
+      <option value="external">חיסכון מחוץ לבנק</option>
     </select>
     <select id="cat-filter"><option value="">כל הקטגוריות</option></select>
     <button id="clear-filters" class="btn" style="height:34px;font-size:12px;">✕ נקה</button>
@@ -546,7 +556,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="tbl-wrap">
     <table id="all-table">
       <thead><tr>
-        <th>תאריך</th><th>תיאור</th><th>קטגוריה</th><th>זכות (₪)</th><th>חובה (₪)</th><th>יתרה (₪)</th>
+        <th>תאריך</th><th>תיאור</th><th>קטגוריה</th><th>זכות (₪)</th><th>חובה (₪)</th><th>יתרה (₪)</th><th>סיווג ידני</th>
       </tr></thead>
       <tbody id="all-tbody"></tbody>
     </table>
@@ -592,18 +602,41 @@ document.getElementById('title').textContent='תנועות בחשבון';
 document.getElementById('sub').textContent=`מקור: ${esc(DATA.source)}`;
 
 // ── Cards ─────────────────────────────────────────────────────────────────
+// ── Override storage (persisted to localStorage) ───────────────────────────
+const STORAGE_KEY='bank-overrides-'+DATA.source;
+let overrides={};
+try{overrides=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');}catch(e){}
+function saveOverrides(){localStorage.setItem(STORAGE_KEY,JSON.stringify(overrides));}
+function effDir(t,idx){return overrides[idx]||t.direction;}
+function calcTotals(){
+  let income=0,expense=0,external=0;
+  DATA.transactions.forEach((t,i)=>{
+    const d=effDir(t,i);
+    if(d==='income')   income  +=t.credit;
+    if(d==='expense')  expense +=t.debit;
+    if(d==='external') external+=(t.debit||t.credit);
+  });
+  return {income,expense,external};
+}
+
 function renderCards(){
-  const netClass=DATA.net>=0?'income':'expense';
+  const {income,expense,external}=calcTotals();
+  const net=income-expense;
+  const netClass=net>=0?'income':'expense';
   const items=[
-    {l:'סה"כ הכנסות',v:'₪'+fmt(DATA.total_income),cls:'income-card',vc:'income',sub:`${DATA.months.length} חודשים`},
-    {l:'סה"כ הוצאות',v:'₪'+fmt(DATA.total_expense),cls:'expense-card',vc:'expense',sub:''},
+    {l:'סה"כ הכנסות',v:'₪'+fmt(income),cls:'income-card',vc:'income',sub:`${DATA.months.length} חודשים`},
+    {l:'סה"כ הוצאות',v:'₪'+fmt(expense),cls:'expense-card',vc:'expense',sub:''},
     {l:'יתרת פיקדונות נוכחית',v:'₪'+fmt(DATA.total_savings),cls:'savings-card',vc:'savings',sub:'יתרה נוכחית בפיקדונות'},
-    {l:'נטו (הכנסות − הוצאות)',v:(DATA.net>=0?'+':'')+'₪'+fmt(DATA.net),cls:'net-card',vc:netClass,sub:''},
+    {l:'נטו (הכנסות − הוצאות)',v:(net>=0?'+':'')+'₪'+fmt(net),cls:'net-card',vc:netClass,sub:''},
     {l:'יתרת פתיחה',v:'₪'+fmt(DATA.opening_balance||0),cls:'',vc:'primary',sub:''},
     {l:'יתרת סגירה',v:'₪'+fmt(DATA.closing_balance||0),cls:'',vc:'primary',sub:''},
   ];
+  if(external>0) items.splice(2,0,
+    {l:'חיסכון מחוץ לבנק',v:'₪'+fmt(external),cls:'external-card',vc:'',sub:'קופ"ג / השקעות / אחר'});
   document.getElementById('cards').innerHTML=items.map(it=>
-    `<div class="card ${it.cls}"><div class="lbl">${esc(it.l)}</div><div class="val ${it.vc}">${it.v}</div><div class="sub2">${it.sub}</div></div>`
+    `<div class="card ${it.cls}"><div class="lbl">${esc(it.l)}</div>
+     <div class="val ${it.vc||''}" style="${it.vc?'':'color:#e65100'}">${it.v}</div>
+     <div class="sub2">${it.sub}</div></div>`
   ).join('');
 }
 
@@ -668,18 +701,30 @@ function renderCharts(){
 
 // ── Monthly table ──────────────────────────────────────────────────────────
 function renderMonthly(){
-  const ti=DATA.months.reduce((s,m)=>s+m.income,0);
-  const te=DATA.months.reduce((s,m)=>s+m.expense,0);
-  const tn=DATA.months.reduce((s,m)=>s+m.net,0);
-  const tc=DATA.months.reduce((s,m)=>s+m.count,0);
+  // Recalc monthly totals respecting overrides
+  const map={};
+  DATA.months.forEach(m=>{map[m.ym]={label:m.label,income:0,expense:0,count:0};});
+  DATA.transactions.forEach((t,i)=>{
+    const ym=t.date.slice(0,7);
+    if(!map[ym]) return;
+    const d=effDir(t,i);
+    if(d==='income')  map[ym].income  +=t.credit;
+    if(d==='expense') map[ym].expense +=t.debit;
+    map[ym].count++;
+  });
+  const months=Object.values(map).sort((a,b)=>a.ym<b.ym?-1:1);
+  const ti=months.reduce((s,m)=>s+m.income,0);
+  const te=months.reduce((s,m)=>s+m.expense,0);
+  const tn=ti-te;
+  const tc=months.reduce((s,m)=>s+m.count,0);
   document.getElementById('monthly-tbody').innerHTML=
-    DATA.months.map(m=>`<tr>
+    months.map(m=>{const net=m.income-m.expense; return `<tr>
       <td>${esc(m.label)}</td>
       <td class="num credit">${m.income>0?fmt(m.income):'—'}</td>
       <td class="num debit">${m.expense>0?fmt(m.expense):'—'}</td>
-      <td class="num ${m.net>=0?'credit':'debit'}">${(m.net>=0?'+':'')+'₪'+fmt(Math.abs(m.net))}</td>
+      <td class="num ${net>=0?'credit':'debit'}">${(net>=0?'+':'')+'₪'+fmt(Math.abs(net))}</td>
       <td class="num">${m.count}</td>
-    </tr>`).join('')+
+    </tr>`;}).join('')+
     `<tr class="sum-row"><td>סה"כ</td><td class="num credit">${fmt(ti)}</td><td class="num debit">${fmt(te)}</td>
      <td class="num ${tn>=0?'credit':'debit'}">${(tn>=0?'+':'')+'₪'+fmt(Math.abs(tn))}</td>
      <td class="num">${tc}</td></tr>`;
@@ -764,36 +809,53 @@ function renderAll(){
   const q=document.getElementById('search').value.trim().toLowerCase();
   const df=document.getElementById('dir-filter').value;
   const cf=document.getElementById('cat-filter').value;
-  const month=document.getElementById('month-filter').value;   // "YYYY-MM" or ""
-  const dateFrom=month ? month+'-01' : document.getElementById('date-from').value;
-  const dateTo  =month ? month+'-31' : document.getElementById('date-to').value;
-
-  // grey out date-from/to when month is active
+  const month=document.getElementById('month-filter').value;
+  const dateFrom=month?month+'-01':document.getElementById('date-from').value;
+  const dateTo  =month?month+'-31':document.getElementById('date-to').value;
   const locked=!!month;
   document.getElementById('date-from').disabled=locked;
   document.getElementById('date-to').disabled=locked;
   document.getElementById('date-from').style.opacity=locked?'0.4':'1';
   document.getElementById('date-to').style.opacity=locked?'0.4':'1';
 
-  let rows=DATA.transactions.filter(t=>{
-    if(q && !t.desc.toLowerCase().includes(q)) return false;
-    if(df && t.direction!==df) return false;
-    if(cf && t.category!==cf) return false;
-    if(dateFrom && t.date < dateFrom) return false;
-    if(dateTo   && t.date > dateTo)   return false;
-    return true;
+  const rows=[];
+  DATA.transactions.forEach((t,i)=>{
+    const dir=effDir(t,i);
+    if(q && !t.desc.toLowerCase().includes(q)) return;
+    if(df && dir!==df) return;
+    if(cf && t.category!==cf) return;
+    if(dateFrom && t.date<dateFrom) return;
+    if(dateTo   && t.date>dateTo)   return;
+    rows.push({t,i,dir});
   });
 
-  const dirLabel={income:'הכנסה',expense:'הוצאה',savings:'פיקדון'};
-  document.getElementById('all-tbody').innerHTML=rows.map(t=>`<tr>
-    <td class="num">${esc(t.date)}</td>
-    <td>${esc(t.desc)}</td>
-    <td><span class="badge badge-${t.direction}">${esc(t.category)}</span></td>
-    <td class="num ${t.credit>0?'credit':''}">${t.credit>0?fmt(t.credit):'—'}</td>
-    <td class="num ${t.debit>0?'debit':''}">${t.debit>0?fmt(t.debit):'—'}</td>
-    <td class="num">${t.balance!=null?fmt(t.balance):'—'}</td>
-  </tr>`).join('');
+  document.getElementById('all-tbody').innerHTML=rows.map(({t,i,dir})=>{
+    const isExt=dir==='external';
+    const btnLabel=isExt?'💼 חיסכון חיצוני':'☐ סמן כחיסכון חיצוני';
+    return `<tr>
+      <td class="num">${esc(t.date)}</td>
+      <td>${esc(t.desc)}</td>
+      <td><span class="badge badge-${dir}">${esc(t.category)}</span></td>
+      <td class="num ${t.credit>0?'credit':''}">${t.credit>0?fmt(t.credit):'—'}</td>
+      <td class="num ${t.debit>0&&!isExt?'debit':''}" style="${isExt?'text-decoration:line-through;color:var(--muted)':''}">
+        ${t.debit>0?fmt(t.debit):'—'}</td>
+      <td class="num">${t.balance!=null?fmt(t.balance):'—'}</td>
+      <td><button class="override-btn${isExt?' is-external':''}" data-idx="${i}">${btnLabel}</button></td>
+    </tr>`;
+  }).join('');
 }
+
+document.getElementById('all-tbody').addEventListener('click',e=>{
+  const btn=e.target.closest('.override-btn');
+  if(!btn) return;
+  const idx=btn.dataset.idx;
+  if(overrides[idx]==='external') delete overrides[idx];
+  else overrides[idx]='external';
+  saveOverrides();
+  renderAll();
+  renderCards();
+  renderMonthly();
+});
 
 // ── Insights ──────────────────────────────────────────────────────────────
 function renderInsights(){
