@@ -794,7 +794,7 @@ document.addEventListener('change',e=>{
 });
 
 document.getElementById('sel-clear').addEventListener('click',()=>{
-  document.querySelectorAll('.row-chk:checked,.select-all').forEach(cb=>{cb.checked=false;});
+  document.querySelectorAll('.row-chk, .select-all').forEach(cb=>{cb.checked=false;});
   updateFloatingBar();
 });
 
