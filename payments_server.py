@@ -65,7 +65,7 @@ UPLOAD_FORM = """<!DOCTYPE html>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
      display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
-.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:480px;width:100%;}
+.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:480px;width:100%;overflow:hidden;}
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;}
 .logo{display:flex;align-items:center;gap:10px;}
 .logo-icon{width:32px;height:32px;background:#378ADD;border-radius:8px;display:flex;align-items:center;justify-content:center;}
@@ -215,10 +215,18 @@ function setMode(el, mode) {
   fileInput.accept = m.accept;
   fileInput.value = '';
   fname.textContent = '';
-  submit.disabled = true;
   modeLabel.textContent = m.label;
   pillsEl.innerHTML = m.pills.map(p => `<span class="pill">${p}</span>`).join('');
-  if (mode === 'multi') window.location.href = '/multi';
+  if (mode === 'multi') {
+    // Multi has its own multi-file uploader page
+    drop.style.display = 'none';
+    submit.disabled = false;
+    submit.textContent = 'עבור לדף ההשוואה ←';
+  } else {
+    drop.style.display = '';
+    submit.textContent = 'העלה קובץ';
+    submit.disabled = !fileInput.files.length;
+  }
 }
 
 function update() {
@@ -245,101 +253,88 @@ COMPARE_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>Payments UI — השוואת חודשים</title>
+<title>Payments — השוואת שני חודשים</title>
 <style>
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f5f5f7;
-         color: #222; display: flex; align-items: center; justify-content: center;
-         min-height: 100vh; margin: 0; padding: 20px; }
-  .card { background: #fff; padding: 32px 36px; border-radius: 12px;
-          box-shadow: 0 2px 16px rgba(0,0,0,0.08); max-width: 520px; width: 100%; }
-  h1 { font-size: 20px; margin: 0 0 6px; }
-  p  { color: #666; font-size: 14px; margin: 0 0 22px; }
-  .row { display: flex; gap: 12px; }
-  .slot { flex: 1; }
-  .slot label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; font-weight: 600; }
-  .drop { display: block; border: 2px dashed #ccc; border-radius: 8px;
-          padding: 28px 12px; text-align: center; cursor: pointer;
-          transition: all 0.15s; background: #fafafa; }
-  .drop:hover, .drop.drag { border-color: #2196f3; background: #e3f2fd; }
-  .drop input { display: none; }
-  .drop .icon  { font-size: 28px; line-height: 1; margin-bottom: 6px; }
-  .drop .label { font-size: 13px; color: #444; }
-  .drop .sub   { font-size: 11px; color: #888; margin-top: 2px; }
-  .fname { margin-top: 6px; font-size: 12px; color: #1976d2; text-align: center; min-height: 16px; }
-  button { margin-top: 18px; width: 100%; padding: 12px; background: #2196f3; color: #fff;
-           border: 0; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
-  button:hover:not(:disabled) { background: #1976d2; }
-  button:disabled { background: #ccc; cursor: not-allowed; }
-  .err { background: #ffebee; color: #c62828; padding: 10px 12px; border-radius: 6px;
-         font-size: 13px; margin-bottom: 14px; }
-  .back { display: block; text-align: center; margin-top: 16px; font-size: 13px; color: #2196f3; text-decoration: none; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:500px;width:100%;overflow:hidden;}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.back-btn{color:#85B7EB;font-size:13px;text-decoration:none;}
+.mode-icon{width:32px;height:32px;background:#D85A30;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+.mode-icon svg{width:16px;height:16px;fill:none;stroke:#FAECE7;stroke-width:2;}
+.ttl{font-size:18px;font-weight:600;color:#E6F1FB;margin-bottom:4px;}
+.sub{font-size:13px;color:#85B7EB;margin-bottom:16px;}
+.err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
+.slot-lbl{font-size:11px;font-weight:600;color:#85B7EB;margin-bottom:6px;letter-spacing:.5px;}
+.drop{display:block;background:#042C53;border:1.5px dashed #378ADD;border-radius:10px;
+      padding:20px 12px;text-align:center;cursor:pointer;transition:border-color .15s;}
+.drop:hover,.drop.drag{border-color:#85B7EB;}
+.drop input{display:none;}
+.di{width:32px;height:32px;background:#0C447C;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;}
+.di svg{width:14px;height:14px;fill:none;stroke:#378ADD;stroke-width:1.8;}
+.dl{font-size:12px;color:#B5D4F4;font-weight:500;margin-bottom:2px;}
+.ds{font-size:11px;color:#378ADD;}
+.fname{font-size:11px;color:#9FE1CB;margin-top:6px;min-height:14px;text-align:center;}
+.footer{display:flex;justify-content:space-between;align-items:center;}
+.sbtn{background:#378ADD;color:#042C53;font-size:14px;font-weight:700;padding:10px 24px;
+      border:none;border-radius:8px;cursor:pointer;}
+.sbtn:hover:not(:disabled){background:#85B7EB;}
+.sbtn:disabled{background:#185FA5;color:#378ADD;cursor:not-allowed;}
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>השוואת שני חודשים</h1>
-    <p>העלו שני קבצי .xlsx, .json או .pdf (למשל ינואר ופברואר) כדי לראות שינויים לפי ענף ובית עסק.</p>
-    __ERROR__
-    <form id="form" action="/compare" method="POST" enctype="multipart/form-data">
-      <div class="row">
-        <div class="slot">
-          <label>חודש א'</label>
-          <label class="drop" data-for="file_a">
-            <div class="icon">📄</div>
-            <div class="label">בחרו קובץ</div>
-            <div class="sub">.xlsx / .json</div>
-            <input type="file" name="file_a" id="file_a" accept=".xlsx,.json,.pdf" required>
-          </label>
-          <div class="fname" id="fname_a"></div>
-        </div>
-        <div class="slot">
-          <label>חודש ב'</label>
-          <label class="drop" data-for="file_b">
-            <div class="icon">📄</div>
-            <div class="label">בחרו קובץ</div>
-            <div class="sub">.xlsx / .json</div>
-            <input type="file" name="file_b" id="file_b" accept=".xlsx,.json,.pdf" required>
-          </label>
-          <div class="fname" id="fname_b"></div>
-        </div>
-      </div>
-      <button type="submit" id="submit" disabled>השוואה</button>
-    </form>
-    <a class="back" href="/">← חזרה לקובץ בודד</a>
+<div class="page">
+  <div class="topbar">
+    <a class="back-btn" href="/">← חזרה</a>
+    <div class="mode-icon"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></div>
   </div>
+  <div class="ttl">השוואת שני חודשים</div>
+  <div class="sub">העלו שני קבצים — לפני ואחרי — ותקבלו השוואה מלאה</div>
+  __ERROR__
+  <form id="form" action="/compare" method="POST" enctype="multipart/form-data">
+    <div class="row">
+      <div>
+        <div class="slot-lbl">חודש א׳</div>
+        <label class="drop" id="drop-a">
+          <input type="file" name="file_a" id="file_a" accept=".xlsx,.json,.pdf" required>
+          <div class="di"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></div>
+          <div class="dl">בחר קובץ</div><div class="ds">xlsx · pdf · json</div>
+        </label>
+        <div class="fname" id="fname_a"></div>
+      </div>
+      <div>
+        <div class="slot-lbl">חודש ב׳</div>
+        <label class="drop" id="drop-b">
+          <input type="file" name="file_b" id="file_b" accept=".xlsx,.json,.pdf" required>
+          <div class="di"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></div>
+          <div class="dl">בחר קובץ</div><div class="ds">xlsx · pdf · json</div>
+        </label>
+        <div class="fname" id="fname_b"></div>
+      </div>
+    </div>
+    <div class="footer">
+      <span style="font-size:12px;color:#85B7EB;">השוואת 2 חודשים</span>
+      <button type="submit" id="submit" disabled class="sbtn">השווה</button>
+    </div>
+  </form>
+</div>
 <script>
-  const fileA = document.getElementById('file_a');
-  const fileB = document.getElementById('file_b');
-  const submit = document.getElementById('submit');
-
-  function update() {
-    document.getElementById('fname_a').textContent = fileA.files[0]?.name || '';
-    document.getElementById('fname_b').textContent = fileB.files[0]?.name || '';
-    submit.disabled = !(fileA.files.length && fileB.files.length);
-  }
-  [fileA, fileB].forEach(f => f.addEventListener('change', update));
-
-  document.querySelectorAll('.drop').forEach(d => {
-    const input = document.getElementById(d.dataset.for);
-    d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('drag'); });
-    d.addEventListener('dragleave', () => d.classList.remove('drag'));
-    d.addEventListener('drop', e => {
-      e.preventDefault();
-      d.classList.remove('drag');
-      if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; update(); }
-    });
+  const fA=document.getElementById('file_a'),fB=document.getElementById('file_b'),sb=document.getElementById('submit');
+  function upd(){document.getElementById('fname_a').textContent=fA.files[0]?.name||'';document.getElementById('fname_b').textContent=fB.files[0]?.name||'';sb.disabled=!(fA.files.length&&fB.files.length);}
+  [fA,fB].forEach(f=>f.addEventListener('change',upd));
+  [['drop-a','file_a'],['drop-b','file_b']].forEach(([dId,fId])=>{
+    const d=document.getElementById(dId),inp=document.getElementById(fId);
+    d.addEventListener('dragover',e=>{e.preventDefault();d.classList.add('drag');});
+    d.addEventListener('dragleave',()=>d.classList.remove('drag'));
+    d.addEventListener('drop',e=>{e.preventDefault();d.classList.remove('drag');if(e.dataTransfer.files.length){inp.files=e.dataTransfer.files;upd();}});
   });
-
-  document.getElementById('form').addEventListener('submit', () => {
-    submit.disabled = true;
-    submit.textContent = 'מעבד...';
-  });
+  document.getElementById('form').addEventListener('submit',()=>{sb.disabled=true;sb.textContent='מעבד...';});
 </script>
 </body>
 </html>
 """
-
 
 def render_form(error: str | None = None) -> str:
     err_html = f'<div class="err">{error}</div>' if error else ""
@@ -432,137 +427,122 @@ MULTI_FORM = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Payments — השוואת חודשים מרובים</title>
 <style>
-  *{box-sizing:border-box;}
-  body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#f5f5f7;
-       color:#222;display:flex;align-items:center;justify-content:center;
-       min-height:100vh;margin:0;padding:20px;}
-  .card{background:#fff;padding:32px 36px;border-radius:12px;
-        box-shadow:0 2px 16px rgba(0,0,0,.08);max-width:560px;width:100%;}
-  h1{font-size:20px;margin:0 0 6px;}
-  p{color:#666;font-size:14px;margin:0 0 20px;}
-  .drop-zone{border:2px dashed #ccc;border-radius:8px;padding:32px 16px;
-             text-align:center;cursor:pointer;transition:.15s;background:#fafafa;}
-  .drop-zone:hover,.drop-zone.drag{border-color:#2196f3;background:#e3f2fd;}
-  .drop-zone input{display:none;}
-  .drop-zone .icon{font-size:36px;line-height:1;margin-bottom:10px;}
-  .drop-zone .lbl{font-size:14px;color:#444;}
-  .drop-zone .sub{font-size:12px;color:#888;margin-top:4px;}
-  .file-list{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
-  .file-item{display:flex;align-items:center;justify-content:space-between;
-             padding:6px 10px;background:#f0f4ff;border-radius:6px;font-size:13px;}
-  .file-item button{background:none;border:none;color:#999;cursor:pointer;font-size:16px;padding:0 4px;}
-  .file-item button:hover{color:#e53935;}
-  .counter{font-size:12px;color:#888;margin-top:6px;text-align:center;}
-  button[type=submit]{margin-top:16px;width:100%;padding:12px;background:#2196f3;
-    color:#fff;border:0;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;}
-  button[type=submit]:hover:not(:disabled){background:#1976d2;}
-  button[type=submit]:disabled{background:#ccc;cursor:not-allowed;}
-  .err{background:#ffebee;color:#c62828;padding:10px 12px;border-radius:6px;
-       font-size:13px;margin-bottom:14px;}
-  .back{display:block;text-align:center;margin-top:16px;font-size:13px;color:#2196f3;text-decoration:none;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:500px;width:100%;overflow:hidden;}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.back-btn{color:#85B7EB;font-size:13px;text-decoration:none;}
+.mode-icon{width:32px;height:32px;background:#534AB7;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+.mode-icon svg{width:16px;height:16px;fill:none;stroke:#EEEDFE;stroke-width:2;}
+.ttl{font-size:18px;font-weight:600;color:#E6F1FB;margin-bottom:4px;}
+.sub{font-size:13px;color:#85B7EB;margin-bottom:16px;}
+.err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;display:none;}
+.drop-zone{background:#042C53;border:1.5px dashed #378ADD;border-radius:12px;
+           padding:24px;text-align:center;cursor:pointer;transition:border-color .15s;margin-bottom:12px;}
+.drop-zone:hover,.drop-zone.drag{border-color:#85B7EB;}
+.drop-zone input{display:none;}
+.di{width:38px;height:38px;background:#0C447C;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;}
+.di svg{width:17px;height:17px;fill:none;stroke:#378ADD;stroke-width:1.8;}
+.dl{font-size:13px;font-weight:600;color:#B5D4F4;margin-bottom:3px;}
+.ds{font-size:11px;color:#378ADD;}
+.file-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
+.file-item{display:flex;align-items:center;justify-content:space-between;
+           background:#042C53;border-radius:8px;padding:8px 12px;font-size:12px;color:#B5D4F4;}
+.file-item button{background:none;border:none;color:#85B7EB;cursor:pointer;font-size:14px;padding:0 2px;}
+.file-item button:hover{color:#F5C4B3;}
+.counter{font-size:11px;color:#85B7EB;text-align:center;margin-bottom:12px;min-height:14px;}
+.footer{display:flex;justify-content:space-between;align-items:center;}
+.sbtn{background:#7F77DD;color:#EEEDFE;font-size:14px;font-weight:700;padding:10px 24px;
+      border:none;border-radius:8px;cursor:pointer;}
+.sbtn:hover:not(:disabled){background:#AFA9EC;}
+.sbtn:disabled{background:#3C3489;color:#7F77DD;cursor:not-allowed;}
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>השוואת חודשים מרובים</h1>
-  <p>העלו בין 2 ל-12 קבצי Excel (.xlsx), PDF כאל, או JSON כדי לראות השוואה מלאה בין החודשים.</p>
+<div class="page">
+  <div class="topbar">
+    <a class="back-btn" href="/">← חזרה</a>
+    <div class="mode-icon"><svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></div>
+  </div>
+  <div class="ttl">השוואת חודשים מרובים</div>
+  <div class="sub">גרור עד 12 קבצים — ותקבל השוואה מלאה בין כל החודשים</div>
   __ERROR__
   <div id="drop" class="drop-zone">
-    <div class="icon">📂</div>
-    <div class="lbl">גררו קבצים או לחצו לבחירה</div>
-    <div class="sub">.xlsx / .pdf / .json · עד 12 קבצים</div>
     <input type="file" name="files" id="files" accept=".xlsx,.json,.pdf" multiple>
+    <div class="di"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></div>
+    <div class="dl">גרור קבצים לכאן</div>
+    <div class="ds">xlsx · pdf · json · עד 12 קבצים</div>
   </div>
   <div class="file-list" id="file-list"></div>
   <div class="counter" id="counter"></div>
-  <div class="err" id="err-msg" style="display:none;margin-top:12px;"></div>
-  <button type="button" id="submit" disabled onclick="submitFiles()">יצירת השוואה</button>
-  <a class="back" href="/">← חזרה</a>
+  <div class="err" id="err-msg"></div>
+  <div class="footer">
+    <span style="font-size:12px;color:#85B7EB;" id="mode-hint">0 קבצים נבחרו</span>
+    <button type="button" id="submit" disabled class="sbtn" onclick="submitFiles()">יצירת השוואה</button>
+  </div>
 </div>
 <script>
-  const MAX = 12;
-  let selected = new DataTransfer();
+  const MAX=12;
+  let selected=new DataTransfer();
+  const dropEl=document.getElementById('drop'),filesEl=document.getElementById('files'),
+        listEl=document.getElementById('file-list'),counterEl=document.getElementById('counter'),
+        submitEl=document.getElementById('submit'),errEl=document.getElementById('err-msg'),
+        hintEl=document.getElementById('mode-hint');
 
-  const dropEl   = document.getElementById('drop');
-  const filesEl  = document.getElementById('files');
-  const listEl   = document.getElementById('file-list');
-  const counterEl= document.getElementById('counter');
-  const submitEl = document.getElementById('submit');
-  const errEl    = document.getElementById('err-msg');
-
-  function refreshUI() {
-    const files = [...selected.files];
-    listEl.innerHTML = files.map((f, i) => `
-      <div class="file-item">
-        <span>📄 ${f.name}</span>
-        <button type="button" data-i="${i}" title="הסר">✕</button>
-      </div>`).join('');
-    counterEl.textContent = files.length ? `${files.length} / ${MAX} קבצים נבחרו` : '';
-    submitEl.disabled = files.length < 2;
-    listEl.querySelectorAll('button[data-i]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = parseInt(btn.dataset.i);
-        const next = new DataTransfer();
-        [...selected.files].forEach((f, i) => { if (i !== idx) next.items.add(f); });
-        selected = next;
-        refreshUI();
+  function refreshUI(){
+    const files=[...selected.files];
+    listEl.innerHTML=files.map((f,i)=>`<div class="file-item"><span>${f.name}</span><button type="button" data-i="${i}">✕</button></div>`).join('');
+    const cnt=files.length;
+    counterEl.textContent=cnt?`${cnt} / ${MAX} קבצים`:'';
+    hintEl.textContent=`${cnt} קבצים נבחרו`;
+    submitEl.disabled=cnt<2;
+    listEl.querySelectorAll('button[data-i]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const idx=parseInt(btn.dataset.i),next=new DataTransfer();
+        [...selected.files].forEach((f,i)=>{if(i!==idx)next.items.add(f);});
+        selected=next;refreshUI();
       });
     });
   }
-
-  function addFiles(newFiles) {
-    for (const f of newFiles) {
-      if (selected.files.length >= MAX) break;
-      const ext = f.name.toLowerCase();
-      if (!ext.endsWith('.xlsx') && !ext.endsWith('.json') && !ext.endsWith('.pdf')) continue;
-      if ([...selected.files].some(e => e.name === f.name)) continue;
+  function addFiles(newFiles){
+    for(const f of newFiles){
+      if(selected.files.length>=MAX)break;
+      const ext=f.name.toLowerCase();
+      if(!ext.endsWith('.xlsx')&&!ext.endsWith('.json')&&!ext.endsWith('.pdf'))continue;
+      if([...selected.files].some(e=>e.name===f.name))continue;
       selected.items.add(f);
     }
     refreshUI();
   }
-
-  async function submitFiles() {
-    if (selected.files.length < 2) return;
-    submitEl.disabled = true;
-    submitEl.textContent = 'מעבד...';
-    errEl.style.display = 'none';
-
-    const fd = new FormData();
-    for (const f of selected.files) fd.append('files', f);
-
-    try {
-      const resp = await fetch('/multi', { method: 'POST', body: fd, redirect: 'follow' });
-      if (resp.ok) {
-        window.location.href = resp.url;
-      } else {
-        const text = await resp.text();
-        const m = text.match(/class="err">([\s\S]*?)<\/div>/);
-        errEl.textContent = m ? m[1] : `שגיאה ${resp.status}`;
-        errEl.style.display = 'block';
-        submitEl.disabled = false;
-        submitEl.textContent = 'יצירת השוואה';
+  async function submitFiles(){
+    if(selected.files.length<2)return;
+    submitEl.disabled=true;submitEl.textContent='מעבד...';errEl.style.display='none';
+    const fd=new FormData();
+    for(const f of selected.files)fd.append('files',f);
+    try{
+      const resp=await fetch('/multi',{method:'POST',body:fd,redirect:'follow'});
+      if(resp.ok){window.location.href=resp.url;}
+      else{
+        const text=await resp.text();
+        const m=text.match(/class="err">([\\s\\S]*?)<\/div>/);
+        errEl.textContent=m?m[1]:`שגיאה ${resp.status}`;errEl.style.display='block';
+        submitEl.disabled=false;submitEl.textContent='יצירת השוואה';
       }
-    } catch(e) {
-      errEl.textContent = 'שגיאת רשת: ' + e.message;
-      errEl.style.display = 'block';
-      submitEl.disabled = false;
-      submitEl.textContent = 'יצירת השוואה';
+    }catch(e){
+      errEl.textContent='שגיאת רשת: '+e.message;errEl.style.display='block';
+      submitEl.disabled=false;submitEl.textContent='יצירת השוואה';
     }
   }
-
-  filesEl.addEventListener('change', () => { addFiles(filesEl.files); filesEl.value=''; });
-  dropEl.addEventListener('click', () => filesEl.click());
-  dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag'); });
-  dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag'));
-  dropEl.addEventListener('drop', e => {
-    e.preventDefault(); dropEl.classList.remove('drag');
-    addFiles(e.dataTransfer.files);
-  });
+  filesEl.addEventListener('change',()=>{addFiles(filesEl.files);filesEl.value='';});
+  dropEl.addEventListener('click',()=>filesEl.click());
+  dropEl.addEventListener('dragover',e=>{e.preventDefault();dropEl.classList.add('drag');});
+  dropEl.addEventListener('dragleave',()=>dropEl.classList.remove('drag'));
+  dropEl.addEventListener('drop',e=>{e.preventDefault();dropEl.classList.remove('drag');addFiles(e.dataTransfer.files);});
 </script>
 </body>
 </html>
 """
-
 
 def render_multi_form(error: str | None = None) -> str:
     err_html = f'<div class="err">{error}</div>' if error else ""
