@@ -937,7 +937,15 @@ function renderInsights(){
 
 // ── Save HTML ─────────────────────────────────────────────────────────────
 document.getElementById('btn-save').addEventListener('click',()=>{
-  const blob=new Blob(['<!DOCTYPE html>'+document.documentElement.outerHTML],{type:'text/html;charset=utf-8'});
+  // Bake the current overrides into the saved file so it opens with all manual changes intact
+  let html='<!DOCTYPE html>'+document.documentElement.outerHTML;
+  const overridesJson=JSON.stringify(overrides);
+  // Replace the empty/loaded overrides init with the current snapshot
+  html=html.replace(
+    /let overrides=\{[^}]*\};\s*try\{overrides=JSON\.parse[^}]+\}catch\(e\)\{\}/,
+    `let overrides=${overridesJson};`
+  );
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`bank_${DATA.source.replace(/\.[^.]+$/,'')}.html`;
   a.click(); URL.revokeObjectURL(a.href);
