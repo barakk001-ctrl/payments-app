@@ -20,6 +20,7 @@ from pathlib import Path
 from flask import Flask, request, redirect
 
 from payments_ui import parse_payments, generate_html, generate_comparison_html, generate_multi_html
+from bank_ui import parse_bank_statement, generate_bank_html
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
@@ -104,6 +105,7 @@ UPLOAD_FORM = """<!DOCTYPE html>
     <div style="text-align:center;margin-top:16px;font-size:13px;display:flex;flex-direction:column;gap:8px;">
       <a href="/compare" style="color:#2196f3;text-decoration:none;">השוואה בין שני חודשים →</a>
       <a href="/multi" style="color:#2196f3;text-decoration:none;">השוואת עד 12 חודשים →</a>
+      <a href="/bank" style="color:#2196f3;text-decoration:none;">📊 ניתוח תנועות בנק (הכנסות vs הוצאות) →</a>
     </div>
   </div>
 <script>
@@ -524,6 +526,122 @@ def upload():
         return generate_html(data)
     except Exception as e:
         return render_form(f"כשל בקריאת הקובץ: {e}"), 400
+
+
+BANK_FORM = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>ניתוח תנועות בנק</title>
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#f5f5f7;
+       color:#222;display:flex;align-items:center;justify-content:center;
+       min-height:100vh;margin:0;padding:20px;}
+  .card{background:#fff;padding:32px 36px;border-radius:12px;
+        box-shadow:0 2px 16px rgba(0,0,0,.08);max-width:460px;width:100%;}
+  h1{font-size:20px;margin:0 0 6px;}
+  p{color:#666;font-size:14px;margin:0 0 22px;}
+  .drop{display:block;border:2px dashed #ccc;border-radius:8px;
+        padding:36px 16px;text-align:center;cursor:pointer;
+        transition:all .15s;background:#fafafa;}
+  .drop:hover,.drop.drag{border-color:#2196f3;background:#e3f2fd;}
+  .drop input{display:none;}
+  .drop .icon{font-size:36px;line-height:1;margin-bottom:10px;}
+  .drop .lbl{font-size:14px;color:#444;}
+  .drop .sub{font-size:12px;color:#888;margin-top:4px;}
+  .fname{margin-top:10px;font-size:13px;color:#1976d2;text-align:center;min-height:18px;}
+  button{margin-top:14px;width:100%;padding:12px;background:#2196f3;color:#fff;
+         border:0;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;}
+  button:hover:not(:disabled){background:#1976d2;}
+  button:disabled{background:#ccc;cursor:not-allowed;}
+  .err{background:#ffebee;color:#c62828;padding:10px 12px;border-radius:6px;
+       font-size:13px;margin-bottom:14px;}
+  .back{display:block;text-align:center;margin-top:16px;font-size:13px;color:#2196f3;text-decoration:none;}
+  .info{background:#e3f2fd;color:#1565c0;padding:10px 12px;border-radius:6px;
+        font-size:13px;margin-bottom:14px;line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📊 ניתוח תנועות בנק</h1>
+  <p>העלו קובץ תנועות מהבנק הבינלאומי — ניתוח הכנסות מול הוצאות, מגמות ותובנות.</p>
+  <div class="info">
+    ✓ קובץ Excel (.xls) — ייצוא מאתר FibiSave<br>
+    ✓ קובץ PDF — דף פירוט מהבנק
+  </div>
+  __ERROR__
+  <form id="form" action="/bank" method="POST" enctype="multipart/form-data">
+    <label class="drop" id="drop">
+      <div class="icon">🏦</div>
+      <div class="lbl">גררו קובץ או לחצו לבחירה</div>
+      <div class="sub">.xls / .pdf · עד 16MB</div>
+      <input type="file" name="file" id="file" accept=".xls,.xlsx,.pdf" required>
+    </label>
+    <div class="fname" id="fname"></div>
+    <button type="submit" id="submit" disabled>ניתוח תנועות</button>
+  </form>
+  <a class="back" href="/">← חזרה לדף הראשי</a>
+</div>
+<script>
+  const drop=document.getElementById('drop'),file=document.getElementById('file'),
+        fname=document.getElementById('fname'),submit=document.getElementById('submit'),
+        form=document.getElementById('form');
+  function update(){if(file.files.length){fname.textContent=file.files[0].name;submit.disabled=false;}}
+  file.addEventListener('change',update);
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');
+    if(e.dataTransfer.files.length){file.files=e.dataTransfer.files;update();}});
+  form.addEventListener('submit',()=>{submit.disabled=true;submit.textContent='מנתח...';});
+</script>
+</body>
+</html>
+"""
+
+
+def render_bank_form(error: str | None = None) -> str:
+    err_html = f'<div class="err">{error}</div>' if error else ""
+    return BANK_FORM.replace("__ERROR__", err_html)
+
+
+@app.get("/bank")
+def bank_form():
+    return render_bank_form()
+
+
+@app.post("/bank")
+def bank_upload():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return render_bank_form("לא נבחר קובץ."), 400
+    if not f.filename.lower().endswith((".xls", ".xlsx", ".pdf")):
+        return render_bank_form("יש להעלות קובץ .xls, .xlsx או .pdf בלבד."), 400
+    try:
+        suffix = Path(f.filename).suffix.lower()
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            f.save(tmp.name)
+            tmp_path = Path(tmp.name)
+        try:
+            data = parse_bank_statement(tmp_path)
+            data["source"] = f.filename
+            data["title"] = Path(f.filename).stem
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        result_id = str(uuid.uuid4())
+        _cache_write(result_id, generate_bank_html(data))
+        _cache_cleanup()
+        return redirect(f"/bank/result/{result_id}")
+    except Exception as e:
+        return render_bank_form(f"כשל בקריאת הקובץ: {e}"), 400
+
+
+@app.get("/bank/result/<result_id>")
+def bank_result(result_id: str):
+    html = _cache_read(result_id)
+    if not html:
+        return redirect("/bank")
+    return html
 
 
 def main() -> int:
