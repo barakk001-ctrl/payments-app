@@ -266,13 +266,26 @@ def parse_bank_statement(path: Path) -> dict:
     transactions = raw['transactions']
 
     # Mark credit-side savings (deposit redemptions like פק קרן) as 'internal'
-    # so they don't inflate or deflate any totals — they're just your own money returning.
-    # Only debit-side savings (new money going into deposits) count as savings outflow.
+    # so they don't inflate any totals — they're just your own money cycling back.
     for t in transactions:
         if t['direction'] == 'savings' and t['credit'] > 0 and t['debit'] == 0:
             t['direction'] = 'internal'
 
-    # Monthly summaries
+    # Savings = most recent deposit balance per deposit account.
+    # Each deposit account (identified by the number in the description e.g. "301-00019")
+    # has its balance grow over time as money is redeemed and redeposited with more.
+    # We take the LAST פקדון debit per account = the current balance locked in savings.
+    _dep_re = re.compile(r'(\d{3}-\d{5})')
+    _last_deposit: dict[str, float] = {}
+    for t in sorted(transactions, key=lambda x: x['date']):
+        if t['direction'] == 'savings' and t['debit'] > 0:
+            m = _dep_re.search(t['desc'])
+            key = m.group(1) if m else 'default'
+            _last_deposit[key] = t['debit']
+    current_savings = round(sum(_last_deposit.values()), 2)
+
+    # Monthly summaries — savings column shows net new money added each month
+    # (new deposit debit minus previous deposit debit for that account)
     monthly: dict = defaultdict(lambda: {'income': 0.0, 'expense': 0.0, 'savings': 0.0, 'count': 0})
     for t in transactions:
         ym = t['date'][:7]
@@ -311,7 +324,7 @@ def parse_bank_statement(path: Path) -> dict:
 
     total_income  = round(sum(t['credit'] for t in transactions if t['direction'] == 'income'),  2)
     total_expense = round(sum(t['debit']  for t in transactions if t['direction'] == 'expense'), 2)
-    total_savings = round(sum(t['debit']  for t in transactions if t['direction'] == 'savings'), 2)
+    total_savings = current_savings  # current balance locked in deposit accounts
 
     # Balance trend (only rows with a balance value)
     balance_trend = [
@@ -559,7 +572,7 @@ function renderCards(){
   const items=[
     {l:'סה"כ הכנסות',v:'₪'+fmt(DATA.total_income),cls:'income-card',vc:'income',sub:`${DATA.months.length} חודשים`},
     {l:'סה"כ הוצאות',v:'₪'+fmt(DATA.total_expense),cls:'expense-card',vc:'expense',sub:''},
-    {l:'פיקדונות וחיסכון',v:'₪'+fmt(DATA.total_savings),cls:'savings-card',vc:'savings',sub:''},
+    {l:'יתרת פיקדונות נוכחית',v:'₪'+fmt(DATA.total_savings),cls:'savings-card',vc:'savings',sub:'יתרה נוכחית בפיקדונות'},
     {l:'נטו (הכנסות − הוצאות)',v:(DATA.net>=0?'+':'')+'₪'+fmt(DATA.net),cls:'net-card',vc:netClass,sub:''},
     {l:'יתרת פתיחה',v:'₪'+fmt(DATA.opening_balance||0),cls:'',vc:'primary',sub:''},
     {l:'יתרת סגירה',v:'₪'+fmt(DATA.closing_balance||0),cls:'',vc:'primary',sub:''},
@@ -696,7 +709,7 @@ function renderInsights(){
   // Savings rate
   const sr=DATA.total_income>0?Math.round(DATA.total_savings/DATA.total_income*100):0;
   items.push({l:sr<10?'warn':'ok',e:'🏦',
-    h:`שיעור חיסכון: <strong>${sr}%</strong> מההכנסות הופנו לפיקדונות (₪${fmt(DATA.total_savings)})`});
+    h:`יתרת פיקדונות נוכחית: <strong>₪${fmt(DATA.total_savings)}</strong> (סכום הפיקדון האחרון שנוסף)`});
 
   // Net per month
   const avgNet=n?DATA.net/n:0;
