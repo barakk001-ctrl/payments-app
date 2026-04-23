@@ -265,23 +265,16 @@ def parse_bank_statement(path: Path) -> dict:
 
     transactions = raw['transactions']
 
-    # Mark credit-side savings (deposit redemptions like פק קרן) as 'internal'
-    # so they don't inflate any totals — they're just your own money cycling back.
-    for t in transactions:
-        if t['direction'] == 'savings' and t['credit'] > 0 and t['debit'] == 0:
-            t['direction'] = 'internal'
-
-    # Savings = the most recent פקדון (deposit) transaction amount.
-    # The user rolls deposits: redeem → add money → redeposit with new total.
-    # The last פקדון debit is the current deposit balance.
+    # Calculate current savings = last פקדון amount per deposit account
+    _dep_re_s = re.compile(r'(\d{3}-\d{5})')
     _last_deposit_amount = 0.0
     for t in sorted(transactions, key=lambda x: x['date']):
         if t['direction'] == 'savings' and t['debit'] > 0 and 'פקדון' in t['desc']:
             _last_deposit_amount = t['debit']
     current_savings = round(_last_deposit_amount, 2)
 
-    # Monthly summaries — savings column shows net new money added each month
-    # (new deposit debit minus previous deposit debit for that account)
+    # Monthly summaries
+    # Savings = net new money added to deposits per month (debit minus credit = actual cash locked up)
     monthly: dict = defaultdict(lambda: {'income': 0.0, 'expense': 0.0, 'savings': 0.0, 'count': 0})
     for t in transactions:
         ym = t['date'][:7]
@@ -290,7 +283,7 @@ def parse_bank_statement(path: Path) -> dict:
         elif t['direction'] == 'expense':
             monthly[ym]['expense'] += t['debit']
         elif t['direction'] == 'savings':
-            monthly[ym]['savings'] += t['debit']
+            monthly[ym]['savings'] += t['debit'] - t['credit']
         monthly[ym]['count'] += 1
 
     months = sorted([
