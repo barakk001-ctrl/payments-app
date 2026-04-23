@@ -451,13 +451,12 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .card.external-card{border-color:#e65100;}
   .chk-col{width:32px;text-align:center !important;padding:6px 4px !important;}
   .chk-col input{width:16px;height:16px;cursor:pointer;accent-color:var(--primary);}
-  .floating-bar{position:fixed;bottom:24px;left:50%;
-    transform:translateX(-50%) translateY(calc(100% + 40px));
+  .floating-bar{display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
     background:var(--card);border:1px solid var(--border-strong);box-shadow:0 -4px 24px rgba(0,0,0,.18);
-    border-radius:14px;padding:12px 24px;display:flex;flex-direction:column;gap:0;
-    font-size:15px;font-weight:600;z-index:100;transition:transform .3s ease;
+    border-radius:14px;padding:12px 24px;flex-direction:column;gap:0;
+    font-size:15px;font-weight:600;z-index:100;
     min-width:300px;max-width:500px;width:90%;}
-  .floating-bar.visible{transform:translateX(-50%) translateY(0);}
+  .floating-bar.visible{display:flex;}
   .floating-bar .bar-top{display:flex;align-items:center;gap:16px;white-space:nowrap;flex-wrap:wrap;}
   .floating-bar .sel-total-income{color:var(--income);}
   .floating-bar .sel-total-expense{color:var(--expense);}
