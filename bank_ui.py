@@ -265,25 +265,29 @@ def parse_bank_statement(path: Path) -> dict:
 
     transactions = raw['transactions']
 
-    # Calculate current savings = last פקדון amount per deposit account
-    _dep_re_s = re.compile(r'(\d{3}-\d{5})')
+    # All transactions related to a deposit account number (e.g. 301-00019, 301-00027)
+    # are internal bank movements — completely excluded from income, expense, and monthly savings.
+    # This covers: פקדון, פק קרן, פק מש, פירעון ריבית פיקדון, חידוש פיקדון — anything on a 301-XXXXX account.
+    _deposit_acct_re = re.compile(r'\b\d{3}-\d{5}\b')
+    for t in transactions:
+        if _deposit_acct_re.search(t['desc']):
+            t['direction'] = 'internal'
+
+    # Calculate current savings = last פקדון debit (the current deposit balance)
     _last_deposit_amount = 0.0
     for t in sorted(transactions, key=lambda x: x['date']):
-        if t['direction'] == 'savings' and t['debit'] > 0 and 'פקדון' in t['desc']:
+        if t['direction'] == 'internal' and t['debit'] > 0 and 'פקדון' in t['desc']:
             _last_deposit_amount = t['debit']
     current_savings = round(_last_deposit_amount, 2)
 
-    # Monthly summaries
-    # Savings = net new money added to deposits per month (debit minus credit = actual cash locked up)
-    monthly: dict = defaultdict(lambda: {'income': 0.0, 'expense': 0.0, 'savings': 0.0, 'count': 0})
+    # Monthly summaries — savings/internal excluded from income & expense
+    monthly: dict = defaultdict(lambda: {'income': 0.0, 'expense': 0.0, 'count': 0})
     for t in transactions:
         ym = t['date'][:7]
         if t['direction'] == 'income':
             monthly[ym]['income'] += t['credit']
         elif t['direction'] == 'expense':
             monthly[ym]['expense'] += t['debit']
-        elif t['direction'] == 'savings':
-            monthly[ym]['savings'] += t['debit'] - t['credit']
         monthly[ym]['count'] += 1
 
     months = sorted([
@@ -292,7 +296,6 @@ def parse_bank_statement(path: Path) -> dict:
             'label':   _month_label(ym),
             'income':  round(d['income'], 2),
             'expense': round(d['expense'], 2),
-            'savings': round(max(d['savings'], 0), 2),
             'net':     round(d['income'] - d['expense'], 2),
             'count':   d['count'],
         }
@@ -501,7 +504,7 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   <h2>סיכום חודשי</h2>
   <table id="monthly-table">
     <thead><tr>
-      <th>חודש</th><th>הכנסות (₪)</th><th>הוצאות (₪)</th><th>חיסכון/פיקדון (₪)</th><th>נטו (₪)</th><th>עסקאות</th>
+      <th>חודש</th><th>הכנסות (₪)</th><th>הוצאות (₪)</th><th>נטו (₪)</th><th>עסקאות</th>
     </tr></thead>
     <tbody id="monthly-tbody"></tbody>
   </table>
@@ -667,7 +670,6 @@ function renderCharts(){
 function renderMonthly(){
   const ti=DATA.months.reduce((s,m)=>s+m.income,0);
   const te=DATA.months.reduce((s,m)=>s+m.expense,0);
-  const ts=DATA.months.reduce((s,m)=>s+m.savings,0);
   const tn=DATA.months.reduce((s,m)=>s+m.net,0);
   const tc=DATA.months.reduce((s,m)=>s+m.count,0);
   document.getElementById('monthly-tbody').innerHTML=
@@ -675,12 +677,11 @@ function renderMonthly(){
       <td>${esc(m.label)}</td>
       <td class="num credit">${m.income>0?fmt(m.income):'—'}</td>
       <td class="num debit">${m.expense>0?fmt(m.expense):'—'}</td>
-      <td class="num" style="color:var(--savings)">${m.savings>0?fmt(m.savings):'—'}</td>
       <td class="num ${m.net>=0?'credit':'debit'}">${(m.net>=0?'+':'')+'₪'+fmt(Math.abs(m.net))}</td>
       <td class="num">${m.count}</td>
     </tr>`).join('')+
     `<tr class="sum-row"><td>סה"כ</td><td class="num credit">${fmt(ti)}</td><td class="num debit">${fmt(te)}</td>
-     <td class="num">${fmt(ts)}</td><td class="num ${tn>=0?'credit':'debit'}">${(tn>=0?'+':'')+'₪'+fmt(Math.abs(tn))}</td>
+     <td class="num ${tn>=0?'credit':'debit'}">${(tn>=0?'+':'')+'₪'+fmt(Math.abs(tn))}</td>
      <td class="num">${tc}</td></tr>`;
 }
 
