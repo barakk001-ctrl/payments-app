@@ -502,29 +502,29 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
       margin-bottom:8px;
       padding:11px 12px;
       column-gap:10px;
-      row-gap:3px;
+      row-gap:4px;
       box-shadow:var(--shadow);
     }
     #all-table tbody td[data-label="תיאור"]{
       grid-column:1;grid-row:1;
       font-size:14px;font-weight:600;
-      border:none;padding:0;white-space:normal;
+      border:none;padding:0;white-space:normal;line-height:1.3;
     }
     #all-table tbody td[data-label="זכות"],
     #all-table tbody td[data-label="חובה"]{
       grid-column:2;grid-row:1;
       font-size:15px;font-weight:700;
-      border:none;padding:0;
-      display:flex;align-items:center;
+      border:none;padding:0;white-space:nowrap;
     }
-    #all-table tbody td[data-label="תאריך"],
-    #all-table tbody td[data-label="קטגוריה"]{
-      grid-column:1/3;grid-row:2;
+    #all-table tbody td[data-label="תאריך"]{
+      grid-column:1;grid-row:2;
       font-size:11px;color:var(--muted);
-      border:none;padding:0;display:inline;
+      border:none;padding:0;
     }
-    #all-table tbody td[data-label="תאריך"]::after{content:" · ";color:var(--border-strong);}
-    /* Hide less important on mobile */
+    #all-table tbody td[data-label="קטגוריה"]{
+      grid-column:2;grid-row:2;
+      font-size:11px;border:none;padding:0;text-align:left;
+    }
     #all-table tbody td[data-label="יתרה"],
     #all-table tbody td[data-label="סיווג"]{display:none;}
     .override-btn{font-size:10px;padding:2px 6px;}

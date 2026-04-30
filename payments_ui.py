@@ -685,7 +685,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       margin-bottom:8px;
       padding:11px 12px;
       column-gap:10px;
-      row-gap:3px;
+      row-gap:4px;
       box-shadow:var(--shadow);
     }
 
@@ -696,7 +696,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       border:none;padding:0;
     }
 
-    /* Primary cell (merchant / בית עסק) — row 1 col 2 */
+    /* Merchant — row 1, col 2 */
     .mobile-cards-table tbody td[data-label="בית עסק"],
     .mobile-cards-table tbody td[data-label="תיאור"]{
       grid-column:2;grid-row:1;
@@ -704,42 +704,40 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       border:none;padding:0;white-space:normal;line-height:1.3;
     }
 
-    /* Amount — row 1 col 3 */
+    /* Amount — row 1, col 3 */
     .mobile-cards-table tbody td[data-label="סכום"],
     .mobile-cards-table tbody td[data-label="סה״כ"],
     .mobile-cards-table tbody td[data-label="יתרה"]{
       grid-column:3;grid-row:1;
       font-size:15px;font-weight:700;
       border:none;padding:0;
-      display:flex;align-items:center;
+      white-space:nowrap;
     }
 
-    /* Secondary metadata — row 2, col 2-3 together */
-    .mobile-cards-table tbody td[data-label="תאריך"],
+    /* Date — row 2, col 2 (left) */
+    .mobile-cards-table tbody td[data-label="תאריך"]{
+      grid-column:2;grid-row:2;
+      font-size:11px;color:var(--muted);
+      border:none;padding:0;
+    }
+
+    /* Category badge — row 2, col 3 (right) */
     .mobile-cards-table tbody td[data-label="ענף"],
-    .mobile-cards-table tbody td[data-label="קטגוריה"],
+    .mobile-cards-table tbody td[data-label="קטגוריה"]{
+      grid-column:3;grid-row:2;
+      font-size:11px;
+      border:none;padding:0;
+      text-align:left;
+    }
+
+    /* Hide everything else on mobile */
     .mobile-cards-table tbody td[data-label="סוג"],
     .mobile-cards-table tbody td[data-label="עסקאות"],
     .mobile-cards-table tbody td[data-label="חיובים"],
     .mobile-cards-table tbody td[data-label="תשלום"],
     .mobile-cards-table tbody td[data-label="נותרו"],
     .mobile-cards-table tbody td[data-label="חובה"],
-    .mobile-cards-table tbody td[data-label="זכות"]{
-      grid-column:2/4;grid-row:2;
-      font-size:11px;color:var(--muted);
-      border:none;padding:0;display:inline;
-      white-space:normal;
-    }
-    /* Show inline with · separator for metadata cells */
-    .mobile-cards-table tbody td[data-label="תאריך"]::after,
-    .mobile-cards-table tbody td[data-label="ענף"]::after,
-    .mobile-cards-table tbody td[data-label="קטגוריה"]::after,
-    .mobile-cards-table tbody td[data-label="סוג"]::after,
-    .mobile-cards-table tbody td[data-label="עסקאות"]::after{
-      content:" · ";color:var(--border-strong);
-    }
-
-    /* Hide noisy/redundant columns on mobile */
+    .mobile-cards-table tbody td[data-label="זכות"],
     .mobile-cards-table tbody td[data-label="סיבה"],
     .mobile-cards-table tbody td[data-label="ממוצע"],
     .mobile-cards-table tbody td[data-label="סכומים"],
@@ -749,7 +747,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       display:none;
     }
 
-    /* Color accent by section */
+    /* Colored left border per section */
     #flagged-table tbody tr{border-right-color:#fb8c00;}
     #installments-table tbody tr{border-right-color:#8e24aa;}
     #subscriptions-table tbody tr{border-right-color:#00acc1;}
