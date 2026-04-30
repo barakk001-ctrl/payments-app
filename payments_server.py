@@ -60,6 +60,7 @@ UPLOAD_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Payments — ניתוח הוצאות</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -80,6 +81,18 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 .feat{border-radius:12px;padding:14px 16px;cursor:pointer;box-shadow:inset 0 0 0 2px transparent;transition:box-shadow .15s;}
 .feat:hover{box-shadow:inset 0 0 0 2px rgba(255,255,255,.25);}
 .feat.active{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55);}
+@media(max-width:480px){
+  body{padding:12px;}
+  .page{padding:20px 16px;border-radius:12px;}
+  .cards{grid-template-columns:1fr 1fr;gap:8px;}
+  .feat{padding:12px;}
+  .headline{font-size:17px;}
+  .drop-zone{padding:16px;}
+  .submit-btn{padding:11px 18px;font-size:14px;}
+  .footer{flex-direction:column;gap:10px;align-items:stretch;}
+  .footer .submit-btn{width:100%;text-align:center;}
+  #mode-label{text-align:center;}
+}
 .feat.blue{background:#185FA5;}
 .feat.teal{background:#0F6E56;}
 .feat.purple{background:#534AB7;}
@@ -260,6 +273,7 @@ COMPARE_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Payments — השוואת שני חודשים</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -289,6 +303,13 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
       border:none;border-radius:8px;cursor:pointer;}
 .sbtn:hover:not(:disabled){background:#85B7EB;}
 .sbtn:disabled{background:#185FA5;color:#378ADD;cursor:not-allowed;}
+@media(max-width:480px){
+  body{padding:12px;}
+  .page{padding:20px 16px;border-radius:12px;}
+  .row{grid-template-columns:1fr;gap:10px;}
+  .footer{flex-direction:column;gap:10px;align-items:stretch;}
+  .sbtn{width:100%;text-align:center;}
+}
 </style>
 </head>
 <body>
@@ -432,6 +453,7 @@ MULTI_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Payments — השוואת חודשים מרובים</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -464,6 +486,13 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
       border:none;border-radius:8px;cursor:pointer;}
 .sbtn:hover:not(:disabled){background:#AFA9EC;}
 .sbtn:disabled{background:#3C3489;color:#7F77DD;cursor:not-allowed;}
+@media(max-width:480px){
+  body{padding:12px;}
+  .page{padding:20px 16px;border-radius:12px;}
+  .footer{flex-direction:column;gap:10px;align-items:stretch;}
+  .sbtn{width:100%;text-align:center;}
+  .file-item{font-size:11px;}
+}
 </style>
 </head>
 <body>
@@ -618,6 +647,7 @@ BANK_FORM = """<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ניתוח תנועות בנק</title>
 <style>
   *{box-sizing:border-box;}

@@ -563,6 +563,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="he" dir="rtl" data-theme="light">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__TITLE__</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -1441,6 +1442,7 @@ COMPARE_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="he" dir="rtl" data-theme="light">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>השוואת תקופות</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -1774,6 +1776,7 @@ MULTI_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="he" dir="rtl" data-theme="light">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>השוואת חודשים מרובים</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
