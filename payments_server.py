@@ -77,9 +77,9 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 .subline{font-size:13px;color:#85B7EB;margin-bottom:18px;}
 .err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
 .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
-.feat{border-radius:12px;padding:14px 16px;cursor:pointer;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .15s;}
-.feat:hover{outline-color:rgba(255,255,255,.25);}
-.feat.active{outline-color:rgba(255,255,255,.5);}
+.feat{border-radius:12px;padding:14px 16px;cursor:pointer;box-shadow:inset 0 0 0 2px transparent;transition:box-shadow .15s;}
+.feat:hover{box-shadow:inset 0 0 0 2px rgba(255,255,255,.25);}
+.feat.active{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55);}
 .feat.blue{background:#185FA5;}
 .feat.teal{background:#0F6E56;}
 .feat.purple{background:#534AB7;}
