@@ -262,7 +262,6 @@ function handleSubmit() {
   submit.disabled = true; submit.textContent = 'מעבד...';
   form.submit();
 }
-form.addEventListener('submit', e => e.preventDefault());
 </script>
 </body>
 </html>
