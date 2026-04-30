@@ -735,7 +735,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="section" id="sec-flagged">
   <h2>סיכום חריגים — לא רגילות או סכום גבוה <span class="count" id="flagged-count"></span></h2>
-  <table id="flagged-table">
+  <table id="flagged-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th><th>תאריך</th><th>בית עסק</th><th>סוג</th><th>ענף</th><th>סכום (₪)</th><th>סיבה</th>
     </tr></thead>
@@ -745,7 +745,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="section" id="sec-duplicates">
   <h2>תשלומים כפולים אפשריים <span class="count" id="duplicates-count"></span></h2>
-  <table id="duplicates-table">
+  <table id="duplicates-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th><th>תאריך</th><th>בית עסק</th><th>סכום בודד (₪)</th><th>חזרות</th><th>סה"כ (₪)</th>
     </tr></thead>
@@ -755,7 +755,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="section" id="sec-subscriptions">
   <h2>מנויים והוראות קבע <span class="count" id="subscriptions-count"></span></h2>
-  <table id="subscriptions-table">
+  <table id="subscriptions-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th><th>בית עסק</th><th>חיובים בחודש</th><th>סכומים (₪)</th><th>סה"כ (₪)</th>
     </tr></thead>
@@ -766,7 +766,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="section" id="sec-installments">
   <h2>תשלומים פתוחים <span class="count" id="installments-count"></span></h2>
   <div class="filter"><div class="src" id="installments-remaining"></div></div>
-  <table id="installments-table">
+  <table id="installments-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th><th>תאריך</th><th>בית עסק</th><th>תשלום חודשי (₪)</th><th>תשלום נוכחי</th><th>נותרו</th><th>יתרה (₪)</th>
     </tr></thead>
@@ -776,7 +776,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="section" id="sec-merchants">
   <h2>Top בתי עסק (לפי סכום) <span class="count" id="merchants-count"></span></h2>
-  <table id="merchants-table">
+  <table id="merchants-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th><th>בית עסק</th><th>עסקאות</th><th>סה"כ (₪)</th><th>ממוצע (₪)</th>
     </tr></thead>
@@ -961,14 +961,14 @@ function renderFlagged() {
   tbody.innerHTML = rows.map(({ p, reasons }) => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
-      <td class="num">${esc(p.date)}</td>
-      <td>${esc(p.merchant)}</td>
-      <td>${typeBadge(p.type)}</td>
-      <td>${esc(p.category || '—')}</td>
-      <td class="num ${amountClass(p)}">${fmt(p.charge)}</td>
-      <td class="reason">${esc(reasons.join(' · '))}</td>
+      <td class="num" data-label="תאריך">${esc(p.date)}</td>
+      <td data-label="בית עסק">${esc(p.merchant)}</td>
+      <td data-label="סוג">${typeBadge(p.type)}</td>
+      <td data-label="ענף">${esc(p.category || '—')}</td>
+      <td class="num ${amountClass(p)}" data-label="סכום">₪${fmt(p.charge)}</td>
+      <td class="reason" data-label="סיבה">${esc(reasons.join(' · '))}</td>
     </tr>
-  `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">${fmt(total)}</td><td></td></tr>`;
+  `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td><td></td></tr>`;
 }
 
 function renderDuplicates() {
@@ -980,13 +980,13 @@ function renderDuplicates() {
   tbody.innerHTML = rows.map(d => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${d.total}" data-label="${esc(d.date + ' · ' + d.merchant + ' (×' + d.count + ')')}"></td>
-      <td class="num">${esc(d.date)}</td>
-      <td>${esc(d.merchant)}</td>
-      <td class="num">${fmt(d.amount)}</td>
-      <td class="num">${d.count}</td>
-      <td class="num amount-high">${fmt(d.total)}</td>
+      <td class="num" data-label="תאריך">${esc(d.date)}</td>
+      <td data-label="בית עסק">${esc(d.merchant)}</td>
+      <td class="num" data-label="סכום בודד">₪${fmt(d.amount)}</td>
+      <td class="num" data-label="חזרות">${d.count}</td>
+      <td class="num amount-high" data-label="סה״כ">₪${fmt(d.total)}</td>
     </tr>
-  `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">${fmt(total)}</td></tr>`;
+  `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td></tr>`;
 }
 
 function renderSubscriptions() {
@@ -998,12 +998,12 @@ function renderSubscriptions() {
   tbody.innerHTML = rows.map(s => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${s.total}" data-label="${esc('הו&quot;ק · ' + s.merchant)}"></td>
-      <td>${esc(s.merchant)}</td>
-      <td class="num">${s.count}</td>
-      <td class="num">${s.amounts.map(a => fmt(a)).join(', ')}</td>
-      <td class="num">${fmt(s.total)}</td>
+      <td data-label="בית עסק">${esc(s.merchant)}</td>
+      <td class="num" data-label="חיובים">${s.count}</td>
+      <td class="num" data-label="סכומים">${s.amounts.map(a => fmt(a)).join(', ')}</td>
+      <td class="num" data-label="סה״כ">₪${fmt(s.total)}</td>
     </tr>
-  `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${rows.reduce((s,r) => s+r.count, 0)}</td><td></td><td class="num">${fmt(total)}</td></tr>`;
+  `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${rows.reduce((s,r) => s+r.count, 0)}</td><td></td><td class="num">₪${fmt(total)}</td></tr>`;
 }
 
 function renderInstallments() {
@@ -1018,14 +1018,14 @@ function renderInstallments() {
   tbody.innerHTML = rows.map(i => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${i.charge}" data-label="${esc(i.date + ' · ' + i.merchant + (i.total ? ' (' + i.current + '/' + i.total + ')' : ''))}"></td>
-      <td class="num">${esc(i.date)}</td>
-      <td>${esc(i.merchant)}</td>
-      <td class="num">${fmt(i.charge)}</td>
-      <td class="num">${i.current || '—'}${i.total ? ' / ' + i.total : ''}</td>
-      <td class="num">${i.remaining_count || 0}</td>
-      <td class="num ${i.remaining_amount > 0 ? 'amount-high' : ''}">${fmt(i.remaining_amount)}</td>
+      <td class="num" data-label="תאריך">${esc(i.date)}</td>
+      <td data-label="בית עסק">${esc(i.merchant)}</td>
+      <td class="num" data-label="תשלום חודשי">₪${fmt(i.charge)}</td>
+      <td class="num" data-label="תשלום">${i.current || '—'}${i.total ? ' / ' + i.total : ''}</td>
+      <td class="num" data-label="נותרו">${i.remaining_count || 0}</td>
+      <td class="num ${i.remaining_amount > 0 ? 'amount-high' : ''}" data-label="יתרה">₪${fmt(i.remaining_amount)}</td>
     </tr>
-  `).join('') + `<tr class="sum-row"><td></td><td colspan="2">סה"כ</td><td class="num">${fmt(totalCharge)}</td><td></td><td></td><td class="num">${fmt(totalRemaining)}</td></tr>`;
+  `).join('') + `<tr class="sum-row"><td></td><td colspan="2">סה"כ</td><td class="num">₪${fmt(totalCharge)}</td><td></td><td></td><td class="num">₪${fmt(totalRemaining)}</td></tr>`;
 }
 
 function renderMerchants() {
@@ -1038,12 +1038,12 @@ function renderMerchants() {
   tbody.innerHTML = rows.map(m => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${m.total}" data-label="${esc(m.name + ' (' + m.count + ' עסקאות)')}"></td>
-      <td>${esc(m.name)}${m.aliases.length > 1 ? `<div class="aliases">${esc(m.aliases.join(' · '))}</div>` : ''}</td>
-      <td class="num">${m.count}</td>
-      <td class="num">${fmt(m.total)}</td>
-      <td class="num">${fmt(m.total / m.count)}</td>
+      <td data-label="בית עסק">${esc(m.name)}${m.aliases.length > 1 ? `<div class="aliases">${esc(m.aliases.join(' · '))}</div>` : ''}</td>
+      <td class="num" data-label="עסקאות">${m.count}</td>
+      <td class="num" data-label="סה״כ">₪${fmt(m.total)}</td>
+      <td class="num" data-label="ממוצע">₪${fmt(m.total / m.count)}</td>
     </tr>
-  `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${totalCount}</td><td class="num">${fmt(totalAmount)}</td><td></td></tr>`;
+  `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${totalCount}</td><td class="num">₪${fmt(totalAmount)}</td><td></td></tr>`;
 }
 
 let sortKey = 'date';
