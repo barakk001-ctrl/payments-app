@@ -64,8 +64,8 @@ UPLOAD_FORM = """<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
-     display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
-.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:480px;width:100%;overflow:hidden;}
+     display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;overflow:hidden;}
+.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:480px;width:100%;overflow:hidden;position:relative;}
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;}
 .logo{display:flex;align-items:center;gap:10px;}
 .logo-icon{width:32px;height:32px;background:#378ADD;border-radius:8px;display:flex;align-items:center;justify-content:center;}
@@ -102,7 +102,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 .feat-hint{font-size:11px;}
 .drop-zone{background:#042C53;border:1.5px dashed #378ADD;border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:border-color .15s;}
 .drop-zone.drag,.drop-zone:hover{border-color:#85B7EB;}
-.drop-zone input{display:none;}
+.drop-zone input{position:absolute;opacity:0;pointer-events:none;width:0;height:0;overflow:hidden;}
 .drop-icon{width:38px;height:38px;background:#0C447C;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;}
 .drop-icon svg{width:17px;height:17px;fill:none;stroke:#378ADD;stroke-width:1.8;}
 .drop-title{font-size:13px;font-weight:600;color:#B5D4F4;margin-bottom:3px;}
