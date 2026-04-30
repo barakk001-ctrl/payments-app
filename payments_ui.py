@@ -670,6 +670,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .insight-card{font-size:13px;}
     .chk-col{width:24px;}
 
+    .mobile-cards-table thead{display:none !important;}
+    .mobile-cards-table .sum-row{display:none !important;}
+
     .mobile-cards-table tbody tr{
       display:grid;
       grid-template-columns:28px 1fr auto;
