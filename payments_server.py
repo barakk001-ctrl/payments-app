@@ -169,8 +169,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
   </div>
 
   <form id="main-form" action="/upload" method="POST" enctype="multipart/form-data">
-    <label class="drop-zone" id="drop" for="file-input">
-      <input type="file" id="file-input" name="file" accept=".xlsx,.json,.pdf" required>
+    <div class="drop-zone" id="drop">
       <div class="drop-icon">
         <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
       </div>
@@ -181,12 +180,13 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
         <span class="pill">xlsx</span><span class="pill">pdf</span>
         <span class="pill">json</span>
       </div>
-    </label>
+    </div>
 
     <div class="footer">
       <span style="font-size:12px;color:#85B7EB;" id="mode-label">כרטיס אשראי — פירוט חודשי</span>
       <button type="button" id="submit" disabled class="submit-btn" onclick="handleSubmit()">העלה קובץ</button>
     </div>
+    <input type="file" id="file-input" name="file" accept=".xlsx,.json,.pdf" style="display:none;position:fixed;left:-9999px;top:-9999px;">
   </form>
 </div>
 
@@ -236,6 +236,7 @@ function update() {
   }
 }
 fileInput.addEventListener('change', update);
+drop.addEventListener('click', () => fileInput.click());
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
 drop.addEventListener('drop', e => {
