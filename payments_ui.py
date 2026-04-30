@@ -663,22 +663,99 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .chart-wrap{height:200px;}
     .section{padding:12px;margin-bottom:12px;}
     .section>h2{font-size:14px;margin-bottom:10px;}
-    /* Card-style rows instead of table on mobile */
-    .mobile-cards-table thead{display:none;}
-    .mobile-cards-table tbody tr{display:flex;flex-direction:column;
-      background:var(--card);border:1px solid var(--border);
-      border-radius:8px;margin-bottom:8px;padding:10px 12px;gap:3px;}
-    .mobile-cards-table tbody td{padding:2px 0;border:none;font-size:13px;display:flex;justify-content:space-between;align-items:center;}
-    .mobile-cards-table tbody td[data-label]::before{content:attr(data-label);
-      font-size:11px;color:var(--muted);font-weight:500;}
-    .mobile-cards-table .sum-row{display:table-row !important;}
-    .mobile-cards-table .sum-row td{display:table-cell !important;border-top:2px solid var(--border-strong);}
     .filter input{min-width:100%;width:100%;}
     .filter{flex-direction:column;}
     .filter select{width:100%;}
     .insights-grid{grid-template-columns:1fr;}
     .insight-card{font-size:13px;}
     .chk-col{width:24px;}
+
+    /* ── Card-style table rows ── */
+    .mobile-cards-table thead{display:none;}
+    .mobile-cards-table .sum-row{display:none;}
+
+    .mobile-cards-table tbody tr{
+      display:grid;
+      grid-template-columns:28px 1fr auto;
+      grid-template-rows:auto auto;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-right:3px solid var(--primary);
+      border-radius:10px;
+      margin-bottom:8px;
+      padding:11px 12px;
+      column-gap:10px;
+      row-gap:3px;
+      box-shadow:var(--shadow);
+    }
+
+    /* Checkbox — spans both rows */
+    .mobile-cards-table tbody td.chk-col{
+      grid-column:1;grid-row:1/3;
+      display:flex;align-items:center;justify-content:center;
+      border:none;padding:0;
+    }
+
+    /* Primary cell (merchant / בית עסק) — row 1 col 2 */
+    .mobile-cards-table tbody td[data-label="בית עסק"],
+    .mobile-cards-table tbody td[data-label="תיאור"]{
+      grid-column:2;grid-row:1;
+      font-size:14px;font-weight:600;color:var(--text);
+      border:none;padding:0;white-space:normal;line-height:1.3;
+    }
+
+    /* Amount — row 1 col 3 */
+    .mobile-cards-table tbody td[data-label="סכום"],
+    .mobile-cards-table tbody td[data-label="סה״כ"],
+    .mobile-cards-table tbody td[data-label="יתרה"]{
+      grid-column:3;grid-row:1;
+      font-size:15px;font-weight:700;
+      border:none;padding:0;
+      display:flex;align-items:center;
+    }
+
+    /* Secondary metadata — row 2, col 2-3 together */
+    .mobile-cards-table tbody td[data-label="תאריך"],
+    .mobile-cards-table tbody td[data-label="ענף"],
+    .mobile-cards-table tbody td[data-label="קטגוריה"],
+    .mobile-cards-table tbody td[data-label="סוג"],
+    .mobile-cards-table tbody td[data-label="עסקאות"],
+    .mobile-cards-table tbody td[data-label="חיובים"],
+    .mobile-cards-table tbody td[data-label="תשלום"],
+    .mobile-cards-table tbody td[data-label="נותרו"],
+    .mobile-cards-table tbody td[data-label="חובה"],
+    .mobile-cards-table tbody td[data-label="זכות"]{
+      grid-column:2/4;grid-row:2;
+      font-size:11px;color:var(--muted);
+      border:none;padding:0;display:inline;
+      white-space:normal;
+    }
+    /* Show inline with · separator for metadata cells */
+    .mobile-cards-table tbody td[data-label="תאריך"]::after,
+    .mobile-cards-table tbody td[data-label="ענף"]::after,
+    .mobile-cards-table tbody td[data-label="קטגוריה"]::after,
+    .mobile-cards-table tbody td[data-label="סוג"]::after,
+    .mobile-cards-table tbody td[data-label="עסקאות"]::after{
+      content:" · ";color:var(--border-strong);
+    }
+
+    /* Hide noisy/redundant columns on mobile */
+    .mobile-cards-table tbody td[data-label="סיבה"],
+    .mobile-cards-table tbody td[data-label="ממוצע"],
+    .mobile-cards-table tbody td[data-label="סכומים"],
+    .mobile-cards-table tbody td[data-label="תשלום חודשי"],
+    .mobile-cards-table tbody td[data-label="הערות"],
+    .mobile-cards-table tbody td[data-label="סיווג"]{
+      display:none;
+    }
+
+    /* Color accent by section */
+    #flagged-table tbody tr{border-right-color:#fb8c00;}
+    #installments-table tbody tr{border-right-color:#8e24aa;}
+    #subscriptions-table tbody tr{border-right-color:#00acc1;}
+    #merchants-table tbody tr{border-right-color:#43a047;}
+    #duplicates-table tbody tr{border-right-color:#e53935;}
+    #all-table tbody tr{border-right-color:var(--primary);}
   }
   .insight-card.alert{ border-color: var(--high); }
   .insight-card .ic  { font-size: 20px; line-height: 1; flex-shrink: 0; margin-top: 1px; }

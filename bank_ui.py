@@ -487,15 +487,46 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
     .filter{flex-direction:column;}
     .filter input,.filter select{width:100%;}
     .insights-grid{grid-template-columns:1fr;}
-    /* Card-style rows for all transactions table on mobile */
+
+    /* ── Pretty card rows for bank transactions ── */
     #all-table thead{display:none;}
-    #all-table tbody tr{display:flex;flex-direction:column;
-      background:var(--card);border:1px solid var(--border);
-      border-radius:8px;margin-bottom:8px;padding:10px 12px;gap:2px;}
-    #all-table tbody td{padding:2px 0;border:none;font-size:13px;
-      display:flex;justify-content:space-between;align-items:center;}
-    #all-table tbody td[data-label]::before{content:attr(data-label);
-      font-size:11px;color:var(--muted);font-weight:500;}
+    #all-table .sum-row{display:none;}
+    #all-table tbody tr{
+      display:grid;
+      grid-template-columns:1fr auto;
+      grid-template-rows:auto auto;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-right:3px solid var(--income);
+      border-radius:10px;
+      margin-bottom:8px;
+      padding:11px 12px;
+      column-gap:10px;
+      row-gap:3px;
+      box-shadow:var(--shadow);
+    }
+    #all-table tbody td[data-label="תיאור"]{
+      grid-column:1;grid-row:1;
+      font-size:14px;font-weight:600;
+      border:none;padding:0;white-space:normal;
+    }
+    #all-table tbody td[data-label="זכות"],
+    #all-table tbody td[data-label="חובה"]{
+      grid-column:2;grid-row:1;
+      font-size:15px;font-weight:700;
+      border:none;padding:0;
+      display:flex;align-items:center;
+    }
+    #all-table tbody td[data-label="תאריך"],
+    #all-table tbody td[data-label="קטגוריה"]{
+      grid-column:1/3;grid-row:2;
+      font-size:11px;color:var(--muted);
+      border:none;padding:0;display:inline;
+    }
+    #all-table tbody td[data-label="תאריך"]::after{content:" · ";color:var(--border-strong);}
+    /* Hide less important on mobile */
+    #all-table tbody td[data-label="יתרה"],
+    #all-table tbody td[data-label="סיווג"]{display:none;}
     .override-btn{font-size:10px;padding:2px 6px;}
   }
   .ic .emoji{font-size:20px;flex-shrink:0;margin-top:1px;}
