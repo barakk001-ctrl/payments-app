@@ -185,7 +185,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 
     <div class="footer">
       <span style="font-size:12px;color:#85B7EB;" id="mode-label">כרטיס אשראי — פירוט חודשי</span>
-      <button type="submit" id="submit" disabled class="submit-btn">העלה קובץ</button>
+      <button type="button" id="submit" disabled class="submit-btn" onclick="handleSubmit()">העלה קובץ</button>
     </div>
   </form>
 </div>
@@ -242,10 +242,13 @@ drop.addEventListener('drop', e => {
   e.preventDefault(); drop.classList.remove('drag');
   if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; update(); }
 });
-form.addEventListener('submit', e => {
-  if (curMode === 'multi') { e.preventDefault(); window.location.href = '/multi'; return; }
+function handleSubmit() {
+  if (curMode === 'multi') { window.location.href = '/multi'; return; }
+  if (!fileInput.files.length) return;
   submit.disabled = true; submit.textContent = 'מעבד...';
-});
+  form.submit();
+}
+form.addEventListener('submit', e => e.preventDefault());
 </script>
 </body>
 </html>
