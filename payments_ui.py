@@ -648,6 +648,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     border-radius: 8px; border-right: 4px solid transparent; background: var(--bg); font-size: 14px; line-height: 1.5; }
   .insight-card.ok   { border-color: #43a047; }
   .insight-card.warn { border-color: #fb8c00; }
+
+  /* ── Mobile ── */
+  @media(max-width:600px){
+    body{padding:12px;}
+    header{flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+    header h1{font-size:17px;}
+    .header-btns{display:flex;gap:6px;flex-wrap:wrap;}
+    .cards{grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
+    .card{padding:12px;}
+    .card .value{font-size:18px;}
+    .charts-grid{grid-template-columns:1fr;gap:12px;}
+    .chart-card{min-height:unset;padding:12px;}
+    .chart-wrap{height:200px;}
+    .section{padding:12px;margin-bottom:12px;}
+    .section>h2{font-size:14px;margin-bottom:10px;}
+    /* Card-style rows instead of table on mobile */
+    .mobile-cards-table thead{display:none;}
+    .mobile-cards-table tbody tr{display:flex;flex-direction:column;
+      background:var(--card);border:1px solid var(--border);
+      border-radius:8px;margin-bottom:8px;padding:10px 12px;gap:3px;}
+    .mobile-cards-table tbody td{padding:2px 0;border:none;font-size:13px;display:flex;justify-content:space-between;align-items:center;}
+    .mobile-cards-table tbody td[data-label]::before{content:attr(data-label);
+      font-size:11px;color:var(--muted);font-weight:500;}
+    .mobile-cards-table .sum-row{display:table-row !important;}
+    .mobile-cards-table .sum-row td{display:table-cell !important;border-top:2px solid var(--border-strong);}
+    .filter input{min-width:100%;width:100%;}
+    .filter{flex-direction:column;}
+    .filter select{width:100%;}
+    .insights-grid{grid-template-columns:1fr;}
+    .insight-card{font-size:13px;}
+    .chk-col{width:24px;}
+  }
   .insight-card.alert{ border-color: var(--high); }
   .insight-card .ic  { font-size: 20px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
   .insight-card .body { flex: 1; color: var(--text); }
@@ -759,7 +791,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <select id="type-filter"><option value="">כל הסוגים</option></select>
     <select id="category-filter"><option value="">כל הענפים</option></select>
   </div>
-  <table id="all-table">
+  <table id="all-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th>
       <th data-k="date">תאריך</th>
@@ -1042,14 +1074,14 @@ function renderAll() {
   document.querySelector('#all-table tbody').innerHTML = rows.map(p => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
-      <td class="num">${esc(p.date)}</td>
-      <td>${esc(p.merchant)}</td>
-      <td>${typeBadge(p.type)}</td>
-      <td>${esc(p.category || '—')}</td>
-      <td class="num ${amountClass(p)}">${fmt(p.charge)}</td>
-      <td>${esc(p.notes || '')}</td>
+      <td class="num" data-label="תאריך">${esc(p.date)}</td>
+      <td data-label="בית עסק">${esc(p.merchant)}</td>
+      <td data-label="סוג">${typeBadge(p.type)}</td>
+      <td data-label="ענף">${esc(p.category || '—')}</td>
+      <td class="num ${amountClass(p)}" data-label="סכום">₪${fmt(p.charge)}</td>
+      <td data-label="הערות">${esc(p.notes || '')}</td>
     </tr>
-  `).join('') + (rows.length ? `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">${fmt(total)}</td><td></td></tr>` : '');
+  `).join('') + (rows.length ? `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td><td></td></tr>` : '');
   const sa = document.querySelector('#all-table .select-all');
   if (sa) sa.checked = false;
   updateFloatingBar();

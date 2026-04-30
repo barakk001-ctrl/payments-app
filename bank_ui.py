@@ -475,6 +475,29 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
   .ic{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:8px;
       border-right:4px solid transparent;background:var(--bg);font-size:14px;line-height:1.5;}
   .ic.ok{border-color:#43a047;}.ic.warn{border-color:#fb8c00;}.ic.alert{border-color:var(--expense);}
+  @media(max-width:600px){
+    body{padding:12px;}
+    header{flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+    header h1{font-size:17px;}
+    .cards{grid-template-columns:1fr 1fr;gap:8px;}
+    .card{padding:12px;}.card .val{font-size:18px;}
+    .charts-row{grid-template-columns:1fr !important;}
+    .chart-wrap,.chart-wrap.tall{height:200px;}
+    .section{padding:12px;}
+    .filter{flex-direction:column;}
+    .filter input,.filter select{width:100%;}
+    .insights-grid{grid-template-columns:1fr;}
+    /* Card-style rows for all transactions table on mobile */
+    #all-table thead{display:none;}
+    #all-table tbody tr{display:flex;flex-direction:column;
+      background:var(--card);border:1px solid var(--border);
+      border-radius:8px;margin-bottom:8px;padding:10px 12px;gap:2px;}
+    #all-table tbody td{padding:2px 0;border:none;font-size:13px;
+      display:flex;justify-content:space-between;align-items:center;}
+    #all-table tbody td[data-label]::before{content:attr(data-label);
+      font-size:11px;color:var(--muted);font-weight:500;}
+    .override-btn{font-size:10px;padding:2px 6px;}
+  }
   .ic .emoji{font-size:20px;flex-shrink:0;margin-top:1px;}
   .ic .body strong{color:var(--primary);font-weight:700;}
 </style>
@@ -832,16 +855,16 @@ function renderAll(){
 
   document.getElementById('all-tbody').innerHTML=rows.map(({t,i,dir})=>{
     const isExt=dir==='external';
-    const btnLabel=isExt?'💼 חיסכון חיצוני':'☐ סמן כחיסכון חיצוני';
+    const btnLabel=isExt?'💼 חיסכון חיצוני':'☐ חיצוני';
     return `<tr>
-      <td class="num">${esc(t.date)}</td>
-      <td>${esc(t.desc)}</td>
-      <td><span class="badge badge-${dir}">${esc(t.category)}</span></td>
-      <td class="num ${t.credit>0?'credit':''}">${t.credit>0?fmt(t.credit):'—'}</td>
-      <td class="num ${t.debit>0&&!isExt?'debit':''}" style="${isExt?'text-decoration:line-through;color:var(--muted)':''}">
+      <td class="num" data-label="תאריך">${esc(t.date)}</td>
+      <td data-label="תיאור">${esc(t.desc)}</td>
+      <td data-label="קטגוריה"><span class="badge badge-${dir}">${esc(t.category)}</span></td>
+      <td class="num ${t.credit>0?'credit':''}" data-label="זכות">${t.credit>0?fmt(t.credit):'—'}</td>
+      <td class="num ${t.debit>0&&!isExt?'debit':''}" data-label="חובה" style="${isExt?'text-decoration:line-through;color:var(--muted)':''}">
         ${t.debit>0?fmt(t.debit):'—'}</td>
-      <td class="num">${t.balance!=null?fmt(t.balance):'—'}</td>
-      <td><button class="override-btn${isExt?' is-external':''}" data-idx="${i}">${btnLabel}</button></td>
+      <td class="num" data-label="יתרה">${t.balance!=null?fmt(t.balance):'—'}</td>
+      <td data-label="סיווג"><button class="override-btn${isExt?' is-external':''}" data-idx="${i}">${btnLabel}</button></td>
     </tr>`;
   }).join('');
 }
