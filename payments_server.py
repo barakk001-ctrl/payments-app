@@ -197,7 +197,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 
     <div class="footer">
       <span style="font-size:12px;color:#85B7EB;" id="mode-label">כרטיס אשראי — פירוט חודשי</span>
-      <button type="button" id="submit" disabled class="submit-btn" onclick="handleSubmit()">העלה קובץ</button>
+      <button type="button" id="go-btn" disabled class="submit-btn" onclick="handleSubmit()">העלה קובץ</button>
     </div>
     <input type="file" id="file-input" name="file" accept=".xlsx,.json,.pdf" style="display:none;position:fixed;left:-9999px;top:-9999px;">
   </form>
@@ -215,7 +215,7 @@ const form = document.getElementById('main-form');
 const fileInput = document.getElementById('file-input');
 const drop = document.getElementById('drop');
 const fname = document.getElementById('fname');
-const submit = document.getElementById('submit');
+const submit = document.getElementById("go-btn");
 const pillsEl = document.getElementById('pills');
 const modeLabel = document.getElementById('mode-label');
 
@@ -343,12 +343,12 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
     </div>
     <div class="footer">
       <span style="font-size:12px;color:#85B7EB;">השוואת 2 חודשים</span>
-      <button type="submit" id="submit" disabled class="sbtn">השווה</button>
+      <button type="submit" id="go-btn" disabled class="sbtn">השווה</button>
     </div>
   </form>
 </div>
 <script>
-  const fA=document.getElementById('file_a'),fB=document.getElementById('file_b'),sb=document.getElementById('submit');
+  const fA=document.getElementById('file_a'),fB=document.getElementById('file_b'),sb=document.getElementById("go-btn");
   function upd(){document.getElementById('fname_a').textContent=fA.files[0]?.name||'';document.getElementById('fname_b').textContent=fB.files[0]?.name||'';sb.disabled=!(fA.files.length&&fB.files.length);}
   [fA,fB].forEach(f=>f.addEventListener('change',upd));
   [['drop-a','file_a'],['drop-b','file_b']].forEach(([dId,fId])=>{
@@ -514,7 +514,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
   <div class="err" id="err-msg"></div>
   <div class="footer">
     <span style="font-size:12px;color:#85B7EB;" id="mode-hint">0 קבצים נבחרו</span>
-    <button type="button" id="submit" disabled class="sbtn" onclick="submitFiles()">יצירת השוואה</button>
+    <button type="button" id="go-btn" disabled class="sbtn" onclick="submitFiles()">יצירת השוואה</button>
   </div>
 </div>
 <script>
@@ -522,7 +522,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
   let selected=new DataTransfer();
   const dropEl=document.getElementById('drop'),filesEl=document.getElementById('files'),
         listEl=document.getElementById('file-list'),counterEl=document.getElementById('counter'),
-        submitEl=document.getElementById('submit'),errEl=document.getElementById('err-msg'),
+        submitEl=document.getElementById("go-btn"),errEl=document.getElementById('err-msg'),
         hintEl=document.getElementById('mode-hint');
 
   function refreshUI(){
@@ -694,13 +694,13 @@ BANK_FORM = """<!DOCTYPE html>
       <input type="file" name="file" id="file" accept=".xls,.xlsx,.pdf" required>
     </label>
     <div class="fname" id="fname"></div>
-    <button type="submit" id="submit" disabled>ניתוח תנועות</button>
+    <button type="submit" id="go-btn" disabled>ניתוח תנועות</button>
   </form>
   <a class="back" href="/">← חזרה לדף הראשי</a>
 </div>
 <script>
   const drop=document.getElementById('drop'),file=document.getElementById('file'),
-        fname=document.getElementById('fname'),submit=document.getElementById('submit'),
+        fname=document.getElementById('fname'),submit=document.getElementById("go-btn"),
         form=document.getElementById('form');
   function update(){if(file.files.length){fname.textContent=file.files[0].name;submit.disabled=false;}}
   file.addEventListener('change',update);
