@@ -670,10 +670,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .insight-card{font-size:13px;}
     .chk-col{width:24px;}
 
-    /* ── Card-style table rows ── */
-    .mobile-cards-table thead{display:none;}
-    .mobile-cards-table .sum-row{display:none;}
-
     .mobile-cards-table tbody tr{
       display:grid;
       grid-template-columns:28px 1fr auto;
@@ -688,49 +684,34 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       row-gap:4px;
       box-shadow:var(--shadow);
     }
-
-    /* Checkbox — spans both rows */
     .mobile-cards-table tbody td.chk-col{
       grid-column:1;grid-row:1/3;
       display:flex;align-items:center;justify-content:center;
       border:none;padding:0;
     }
-
-    /* Merchant — row 1, col 2 */
     .mobile-cards-table tbody td[data-label="בית עסק"],
     .mobile-cards-table tbody td[data-label="תיאור"]{
       grid-column:2;grid-row:1;
       font-size:14px;font-weight:600;color:var(--text);
       border:none;padding:0;white-space:normal;line-height:1.3;
     }
-
-    /* Amount — row 1, col 3 */
     .mobile-cards-table tbody td[data-label="סכום"],
     .mobile-cards-table tbody td[data-label="סה״כ"],
     .mobile-cards-table tbody td[data-label="יתרה"]{
       grid-column:3;grid-row:1;
       font-size:15px;font-weight:700;
-      border:none;padding:0;
-      white-space:nowrap;
+      border:none;padding:0;white-space:nowrap;
     }
-
-    /* Date — row 2, col 2 (left) */
-    .mobile-cards-table tbody td[data-label="תאריך"]{
-      grid-column:2;grid-row:2;
+    /* Single combined meta cell — date · category on one line */
+    .mobile-cards-table tbody td[data-label="meta"]{
+      grid-column:2/4;grid-row:2;
       font-size:11px;color:var(--muted);
       border:none;padding:0;
     }
-
-    /* Category badge — row 2, col 3 (right) */
+    /* Hide all individual secondary cells (replaced by meta) */
+    .mobile-cards-table tbody td[data-label="תאריך"],
     .mobile-cards-table tbody td[data-label="ענף"],
-    .mobile-cards-table tbody td[data-label="קטגוריה"]{
-      grid-column:3;grid-row:2;
-      font-size:11px;
-      border:none;padding:0;
-      text-align:left;
-    }
-
-    /* Hide everything else on mobile */
+    .mobile-cards-table tbody td[data-label="קטגוריה"],
     .mobile-cards-table tbody td[data-label="סוג"],
     .mobile-cards-table tbody td[data-label="עסקאות"],
     .mobile-cards-table tbody td[data-label="חיובים"],
@@ -746,8 +727,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .mobile-cards-table tbody td[data-label="סיווג"]{
       display:none;
     }
-
-    /* Colored left border per section */
     #flagged-table tbody tr{border-right-color:#fb8c00;}
     #installments-table tbody tr{border-right-color:#8e24aa;}
     #subscriptions-table tbody tr{border-right-color:#00acc1;}
@@ -1036,11 +1015,11 @@ function renderFlagged() {
   tbody.innerHTML = rows.map(({ p, reasons }) => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
-      <td class="num" data-label="תאריך">${esc(p.date)}</td>
       <td data-label="בית עסק">${esc(p.merchant)}</td>
-      <td data-label="סוג">${typeBadge(p.type)}</td>
-      <td data-label="ענף">${esc(p.category || '—')}</td>
       <td class="num ${amountClass(p)}" data-label="סכום">₪${fmt(p.charge)}</td>
+      <td data-label="meta">${esc(p.date)}${p.category?' · '+esc(p.category):''}</td>
+      <td data-label="תאריך">${esc(p.date)}</td><td data-label="ענף">${esc(p.category||'—')}</td>
+      <td data-label="סוג">${typeBadge(p.type)}</td>
       <td class="reason" data-label="סיבה">${esc(reasons.join(' · '))}</td>
     </tr>
   `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td><td></td></tr>`;
@@ -1055,11 +1034,10 @@ function renderDuplicates() {
   tbody.innerHTML = rows.map(d => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${d.total}" data-label="${esc(d.date + ' · ' + d.merchant + ' (×' + d.count + ')')}"></td>
-      <td class="num" data-label="תאריך">${esc(d.date)}</td>
       <td data-label="בית עסק">${esc(d.merchant)}</td>
-      <td class="num" data-label="סכום בודד">₪${fmt(d.amount)}</td>
-      <td class="num" data-label="חזרות">${d.count}</td>
       <td class="num amount-high" data-label="סה״כ">₪${fmt(d.total)}</td>
+      <td data-label="meta">${esc(d.date)} · ×${d.count} · ₪${fmt(d.amount)}</td>
+      <td data-label="תאריך">${esc(d.date)}</td><td data-label="סכום בודד">₪${fmt(d.amount)}</td><td data-label="חזרות">${d.count}</td>
     </tr>
   `).join('') + `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td></tr>`;
 }
@@ -1074,9 +1052,9 @@ function renderSubscriptions() {
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${s.total}" data-label="${esc('הו&quot;ק · ' + s.merchant)}"></td>
       <td data-label="בית עסק">${esc(s.merchant)}</td>
-      <td class="num" data-label="חיובים">${s.count}</td>
-      <td class="num" data-label="סכומים">${s.amounts.map(a => fmt(a)).join(', ')}</td>
       <td class="num" data-label="סה״כ">₪${fmt(s.total)}</td>
+      <td data-label="meta">הו"ק · ${s.count} חיובים</td>
+      <td data-label="חיובים">${s.count}</td><td data-label="סכומים">${s.amounts.map(a=>fmt(a)).join(', ')}</td>
     </tr>
   `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${rows.reduce((s,r) => s+r.count, 0)}</td><td></td><td class="num">₪${fmt(total)}</td></tr>`;
 }
@@ -1093,12 +1071,11 @@ function renderInstallments() {
   tbody.innerHTML = rows.map(i => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${i.charge}" data-label="${esc(i.date + ' · ' + i.merchant + (i.total ? ' (' + i.current + '/' + i.total + ')' : ''))}"></td>
-      <td class="num" data-label="תאריך">${esc(i.date)}</td>
       <td data-label="בית עסק">${esc(i.merchant)}</td>
-      <td class="num" data-label="תשלום חודשי">₪${fmt(i.charge)}</td>
-      <td class="num" data-label="תשלום">${i.current || '—'}${i.total ? ' / ' + i.total : ''}</td>
-      <td class="num" data-label="נותרו">${i.remaining_count || 0}</td>
-      <td class="num ${i.remaining_amount > 0 ? 'amount-high' : ''}" data-label="יתרה">₪${fmt(i.remaining_amount)}</td>
+      <td class="num ${i.remaining_amount>0?'amount-high':''}" data-label="יתרה">₪${fmt(i.remaining_amount)}</td>
+      <td data-label="meta">${esc(i.date)} · תשלום ${i.current||'—'}${i.total?' / '+i.total:''} · נותרו ${i.remaining_count||0}</td>
+      <td data-label="תאריך">${esc(i.date)}</td><td data-label="תשלום חודשי">₪${fmt(i.charge)}</td>
+      <td data-label="תשלום">${i.current||'—'}${i.total?' / '+i.total:''}</td><td data-label="נותרו">${i.remaining_count||0}</td>
     </tr>
   `).join('') + `<tr class="sum-row"><td></td><td colspan="2">סה"כ</td><td class="num">₪${fmt(totalCharge)}</td><td></td><td></td><td class="num">₪${fmt(totalRemaining)}</td></tr>`;
 }
@@ -1113,10 +1090,10 @@ function renderMerchants() {
   tbody.innerHTML = rows.map(m => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${m.total}" data-label="${esc(m.name + ' (' + m.count + ' עסקאות)')}"></td>
-      <td data-label="בית עסק">${esc(m.name)}${m.aliases.length > 1 ? `<div class="aliases">${esc(m.aliases.join(' · '))}</div>` : ''}</td>
-      <td class="num" data-label="עסקאות">${m.count}</td>
+      <td data-label="בית עסק">${esc(m.name)}${m.aliases.length>1?`<div class="aliases">${esc(m.aliases.join(' · '))}</div>`:''}</td>
       <td class="num" data-label="סה״כ">₪${fmt(m.total)}</td>
-      <td class="num" data-label="ממוצע">₪${fmt(m.total / m.count)}</td>
+      <td data-label="meta">${m.count} עסקאות · ממוצע ₪${fmt(m.total/m.count)}</td>
+      <td data-label="עסקאות">${m.count}</td><td data-label="ממוצע">₪${fmt(m.total/m.count)}</td>
     </tr>
   `).join('') + `<tr class="sum-row"><td></td><td>סה"כ</td><td class="num">${totalCount}</td><td class="num">₪${fmt(totalAmount)}</td><td></td></tr>`;
 }
@@ -1149,12 +1126,13 @@ function renderAll() {
   document.querySelector('#all-table tbody').innerHTML = rows.map(p => `
     <tr>
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
-      <td class="num" data-label="תאריך">${esc(p.date)}</td>
       <td data-label="בית עסק">${esc(p.merchant)}</td>
-      <td data-label="סוג">${typeBadge(p.type)}</td>
-      <td data-label="ענף">${esc(p.category || '—')}</td>
       <td class="num ${amountClass(p)}" data-label="סכום">₪${fmt(p.charge)}</td>
-      <td data-label="הערות">${esc(p.notes || '')}</td>
+      <td data-label="meta">${esc(p.date)}${p.category?' · '+esc(p.category):''}</td>
+      <td data-label="תאריך">${esc(p.date)}</td>
+      <td data-label="ענף">${esc(p.category||'—')}</td>
+      <td data-label="סוג">${typeBadge(p.type)}</td>
+      <td data-label="הערות">${esc(p.notes||'')}</td>
     </tr>
   `).join('') + (rows.length ? `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td><td></td></tr>` : '');
   const sa = document.querySelector('#all-table .select-all');

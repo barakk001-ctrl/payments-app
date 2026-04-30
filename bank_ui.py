@@ -516,15 +516,13 @@ BANK_HTML_TEMPLATE = r"""<!DOCTYPE html>
       font-size:15px;font-weight:700;
       border:none;padding:0;white-space:nowrap;
     }
-    #all-table tbody td[data-label="תאריך"]{
-      grid-column:1;grid-row:2;
+    #all-table tbody td[data-label="meta"]{
+      grid-column:1/3;grid-row:2;
       font-size:11px;color:var(--muted);
       border:none;padding:0;
     }
-    #all-table tbody td[data-label="קטגוריה"]{
-      grid-column:2;grid-row:2;
-      font-size:11px;border:none;padding:0;text-align:left;
-    }
+    #all-table tbody td[data-label="תאריך"],
+    #all-table tbody td[data-label="קטגוריה"],
     #all-table tbody td[data-label="יתרה"],
     #all-table tbody td[data-label="סיווג"]{display:none;}
     .override-btn{font-size:10px;padding:2px 6px;}
@@ -888,13 +886,14 @@ function renderAll(){
     const isExt=dir==='external';
     const btnLabel=isExt?'💼 חיסכון חיצוני':'☐ חיצוני';
     return `<tr>
-      <td class="num" data-label="תאריך">${esc(t.date)}</td>
       <td data-label="תיאור">${esc(t.desc)}</td>
-      <td data-label="קטגוריה"><span class="badge badge-${dir}">${esc(t.category)}</span></td>
-      <td class="num ${t.credit>0?'credit':''}" data-label="זכות">${t.credit>0?fmt(t.credit):'—'}</td>
+      <td class="num ${t.credit>0?'credit':''}" data-label="זכות">${t.credit>0?'+₪'+fmt(t.credit):'—'}</td>
       <td class="num ${t.debit>0&&!isExt?'debit':''}" data-label="חובה" style="${isExt?'text-decoration:line-through;color:var(--muted)':''}">
-        ${t.debit>0?fmt(t.debit):'—'}</td>
-      <td class="num" data-label="יתרה">${t.balance!=null?fmt(t.balance):'—'}</td>
+        ${t.debit>0?'-₪'+fmt(t.debit):'—'}</td>
+      <td data-label="meta">${esc(t.date)}${t.category?' · '+esc(t.category):''}</td>
+      <td data-label="תאריך">${esc(t.date)}</td>
+      <td data-label="קטגוריה"><span class="badge badge-${dir}">${esc(t.category)}</span></td>
+      <td data-label="יתרה">${t.balance!=null?fmt(t.balance):'—'}</td>
       <td data-label="סיווג"><button class="override-btn${isExt?' is-external':''}" data-idx="${i}">${btnLabel}</button></td>
     </tr>`;
   }).join('');
