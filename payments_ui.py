@@ -779,6 +779,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="cards" id="cards"></div>
 
+<!-- Card breakdown bar — shown only for merged multi-card results -->
+<div id="card-breakdown" style="display:none;background:var(--card);border-radius:10px;padding:14px 20px;margin-bottom:20px;box-shadow:var(--shadow);">
+  <div style="font-size:13px;font-weight:600;color:var(--muted);margin-bottom:10px;">פילוח לפי כרטיס</div>
+  <div id="card-breakdown-bars"></div>
+</div>
+
 <div class="charts-grid">
   <div class="chart-card"><h2>חלוקה לפי ענף</h2><div class="chart-wrap"><canvas id="chart-category"></canvas></div></div>
   <div class="chart-card"><h2>מגמה יומית</h2><div class="chart-wrap"><canvas id="chart-daily"></canvas></div></div>
@@ -847,12 +853,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <input id="search" type="text" placeholder="חיפוש בית עסק / ענף...">
     <select id="type-filter"><option value="">כל הסוגים</option></select>
     <select id="category-filter"><option value="">כל הענפים</option></select>
+    <select id="card-filter" style="display:none"><option value="">כל הכרטיסים</option></select>
   </div>
   <table id="all-table" class="mobile-cards-table">
     <thead><tr>
       <th class="chk-col"><input type="checkbox" class="select-all"></th>
       <th data-k="date">תאריך</th>
       <th data-k="merchant">בית עסק</th>
+      <th data-k="card">כרטיס</th>
       <th data-k="type">סוג</th>
       <th data-k="category">ענף</th>
       <th data-k="charge">סכום (₪)</th>
@@ -927,6 +935,26 @@ function renderCards() {
   document.getElementById('cards').innerHTML = cards
     .map(([l, v, sub]) => `<div class="card"><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="sub">${esc(sub)}</div></div>`)
     .join('');
+
+  // Card breakdown bar — shown only for merged results
+  if (DATA.is_merged && DATA.card_totals && DATA.card_totals.length > 1) {
+    const breakdown = document.getElementById('card-breakdown');
+    breakdown.style.display = '';
+    const COLORS = ['#2196f3','#ef6c00','#43a047','#8e24aa','#e53935'];
+    const grand = DATA.card_totals.reduce((s,c)=>s+c.total,0);
+    document.getElementById('card-breakdown-bars').innerHTML = DATA.card_totals.map((c,i) => {
+      const pct = grand > 0 ? Math.round(c.total/grand*100) : 0;
+      return `<div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+          <span style="font-weight:600;color:var(--text)">${esc(c.label)}</span>
+          <span style="color:var(--muted)">₪${fmt(c.total)} <span style="color:${COLORS[i%5]};font-weight:700;">${pct}%</span></span>
+        </div>
+        <div style="background:var(--border);border-radius:4px;height:8px;">
+          <div style="width:${pct}%;background:${COLORS[i%5]};border-radius:4px;height:8px;transition:width .4s;"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
 }
 
 // -------------------- Charts --------------------
@@ -1108,11 +1136,13 @@ function renderAll() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const tf = document.getElementById('type-filter').value;
   const cf = document.getElementById('category-filter').value;
+  const cardF = document.getElementById('card-filter').value;
 
   let rows = DATA.payments.filter(p => {
     if (q && !(p.merchant.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q))) return false;
     if (tf && p.type !== tf) return false;
     if (cf && (p.category || '') !== cf) return false;
+    if (cardF && (p.card || '') !== cardF) return false;
     return true;
   });
 
@@ -1131,13 +1161,14 @@ function renderAll() {
       <td class="chk-col"><input type="checkbox" class="row-chk" data-amount="${p.charge}" data-label="${esc(p.date + ' · ' + p.merchant)}"></td>
       <td data-label="בית עסק">${esc(p.merchant)}</td>
       <td class="num ${amountClass(p)}" data-label="סכום">₪${fmt(p.charge)}</td>
-      <td data-label="meta">${esc(p.date)}${p.category?' · '+esc(p.category):''}</td>
+      <td data-label="meta">${esc(p.date)}${p.category?' · '+esc(p.category):''}${p.card?' · '+esc(p.card):''}</td>
       <td data-label="תאריך">${esc(p.date)}</td>
-      <td data-label="ענף">${esc(p.category||'—')}</td>
+      <td data-label="ענף">${esc(p.category || '—')}</td>
+      <td data-label="כרטיס">${DATA.is_merged && p.card ? `<span class="badge badge-regular">${esc(p.card)}</span>` : '—'}</td>
       <td data-label="סוג">${typeBadge(p.type)}</td>
-      <td data-label="הערות">${esc(p.notes||'')}</td>
+      <td data-label="הערות">${esc(p.notes || '')}</td>
     </tr>
-  `).join('') + (rows.length ? `<tr class="sum-row"><td></td><td colspan="4">סה"כ</td><td class="num">₪${fmt(total)}</td><td></td></tr>` : '');
+  `).join('') + (rows.length ? `<tr class="sum-row"><td></td><td colspan="5">סה"כ</td><td class="num">₪${fmt(total)}</td><td></td></tr>` : '');
   const sa = document.querySelector('#all-table .select-all');
   if (sa) sa.checked = false;
   updateFloatingBar();
@@ -1321,6 +1352,14 @@ function initFilters() {
   const cats = [...new Set(DATA.payments.map(p => p.category).filter(Boolean))].sort();
   document.getElementById('type-filter').insertAdjacentHTML('beforeend', types.map(t => `<option>${esc(t)}</option>`).join(''));
   document.getElementById('category-filter').insertAdjacentHTML('beforeend', cats.map(c => `<option>${esc(c)}</option>`).join(''));
+  // Card filter — only show if this is a merged multi-card result
+  if (DATA.is_merged && DATA.card_totals && DATA.card_totals.length > 1) {
+    const cardFilter = document.getElementById('card-filter');
+    cardFilter.style.display = '';
+    DATA.card_totals.forEach(c => {
+      cardFilter.insertAdjacentHTML('beforeend', `<option value="${esc(c.label)}">${esc(c.label)}</option>`);
+    });
+  }
 }
 
 // Collapsible sections
@@ -1336,7 +1375,7 @@ document.querySelectorAll('#all-table th[data-k]').forEach(th => {
   });
 });
 
-['search', 'type-filter', 'category-filter'].forEach(id =>
+['search', 'type-filter', 'category-filter', 'card-filter'].forEach(id =>
   document.getElementById(id).addEventListener('input', renderAll));
 
 // -------------------- Selection / floating bar --------------------
@@ -1440,6 +1479,49 @@ def generate_html(data: dict) -> str:
         "summary": build_summary(data["payments"]),
         "insights": build_insights(data["payments"]),
         "high_threshold": HIGH_THRESHOLD,
+    }
+    return HTML_TEMPLATE \
+        .replace("__TITLE__", payload["title"]) \
+        .replace("__DATA__", json.dumps(payload, ensure_ascii=False))
+
+
+def merge_cards(cards_data: list[dict]) -> dict:
+    """Merge up to 5 parsed payment dicts from the same month into one combined dataset.
+    Each transaction gets a 'card' field with the source card label."""
+    all_payments = []
+    card_totals = []
+
+    for i, d in enumerate(cards_data):
+        label = d.get("title") or d.get("source") or f"כרטיס {i+1}"
+        # Shorten label for display
+        short = label.replace("דף פירוט דיגיטלי כאל", "כאל").replace("_", " ")
+        card_total = sum(p["charge"] for p in d["payments"])
+        card_totals.append({"label": short, "total": round(card_total, 2)})
+        for p in d["payments"]:
+            all_payments.append({**p, "card": short})
+
+    grand_total = sum(p["charge"] for p in all_payments)
+    # Use the first card's title as base, generalise it
+    base_title = "סיכום " + str(len(cards_data)) + " כרטיסי אשראי"
+
+    return {
+        "title": base_title,
+        "source": " + ".join(d.get("source", "") for d in cards_data),
+        "payments": all_payments,
+        "card_totals": card_totals,
+        "grand_total": round(grand_total, 2),
+    }
+
+
+def generate_merged_html(cards_data: list[dict]) -> str:
+    """Generate a combined HTML dashboard for multiple credit cards in the same month."""
+    merged = merge_cards(cards_data)
+    payload = {
+        **merged,
+        "summary": build_summary(merged["payments"]),
+        "insights": build_insights(merged["payments"]),
+        "high_threshold": HIGH_THRESHOLD,
+        "is_merged": True,
     }
     return HTML_TEMPLATE \
         .replace("__TITLE__", payload["title"]) \

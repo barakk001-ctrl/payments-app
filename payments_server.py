@@ -19,7 +19,7 @@ from pathlib import Path
 
 from flask import Flask, request, redirect
 
-from payments_ui import parse_payments, generate_html, generate_comparison_html, generate_multi_html
+from payments_ui import parse_payments, generate_html, generate_comparison_html, generate_multi_html, generate_merged_html
 from bank_ui import parse_bank_statement, generate_bank_html
 
 app = Flask(__name__)
@@ -77,7 +77,7 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 .headline{font-size:19px;font-weight:600;color:#E6F1FB;margin-bottom:3px;}
 .subline{font-size:13px;color:#85B7EB;margin-bottom:18px;}
 .err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px;}
 .feat{border-radius:12px;padding:14px 16px;cursor:pointer;box-shadow:inset 0 0 0 2px transparent;transition:box-shadow .15s;}
 .feat:hover{box-shadow:inset 0 0 0 2px rgba(255,255,255,.25);}
 .feat.active{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55);}
@@ -151,33 +151,40 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
   __ERROR__
 
   <div class="cards">
-    <div class="feat blue active" data-mode="credit" onclick="setMode(this,'credit','/upload','file','.xlsx,.json,.pdf')">
+    <div class="feat blue active" data-mode="credit" onclick="setMode(this,'credit')">
       <div class="feat-icon">
         <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
       </div>
       <div class="feat-name">כרטיס אשראי</div>
       <div class="feat-hint">Cal · Isracard · xlsx · pdf</div>
     </div>
-    <div class="feat teal" data-mode="bank" onclick="setMode(this,'bank','/bank','bank-file','.xls,.xlsx,.pdf')">
+    <div class="feat teal" data-mode="bank" onclick="setMode(this,'bank')">
       <div class="feat-icon">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       </div>
       <div class="feat-name">תנועות בנק</div>
       <div class="feat-hint">Fibi · xls · pdf</div>
     </div>
-    <div class="feat purple" data-mode="multi" onclick="setMode(this,'multi',null,null,null)">
+    <div class="feat purple" data-mode="multi" onclick="setMode(this,'multi')">
       <div class="feat-icon">
         <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
       </div>
       <div class="feat-name">השוואת חודשים</div>
       <div class="feat-hint">עד 12 חודשים</div>
     </div>
-    <div class="feat coral" data-mode="compare" onclick="setMode(this,'compare','/compare','cmp-file','.xlsx,.json,.pdf')">
+    <div class="feat coral" data-mode="compare" onclick="setMode(this,'compare')">
       <div class="feat-icon">
         <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
       </div>
       <div class="feat-name">השוואת 2 חודשים</div>
       <div class="feat-hint">לפני / אחרי</div>
+    </div>
+    <div class="feat" style="background:#1A5276;" data-mode="cards" onclick="setMode(this,'cards')">
+      <div class="feat-icon" style="background:#2E86C1;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#E6F1FB" stroke-width="1.8"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/><rect x="5" y="14" width="4" height="2" rx="1"/></svg>
+      </div>
+      <div class="feat-name">סיכום כרטיסים</div>
+      <div class="feat-hint" style="color:#85B7EB;">עד 5 כרטיסים · חודש אחד</div>
     </div>
   </div>
 
@@ -207,15 +214,16 @@ body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
 const modes = {
   credit:  {action:'/upload', accept:'.xlsx,.json,.pdf', label:'כרטיס אשראי — פירוט חודשי',  pills:['xlsx','pdf','json']},
   bank:    {action:'/bank',   accept:'.xls,.xlsx,.pdf',  label:'תנועות בנק — הכנסות vs הוצאות', pills:['xls','pdf']},
-  multi:   {action:'/multi',  accept:'.xlsx,.json,.pdf', label:'השוואת עד 12 חודשים',         pills:['xlsx','pdf','json'], multi:true},
-  compare: {action:'/compare',accept:'.xlsx,.json,.pdf', label:'השוואת 2 חודשים',              pills:['xlsx','pdf','json']},
+  multi:   {action:'/multi',  accept:'.xlsx,.json,.pdf', label:'השוואת עד 12 חודשים',         pills:['xlsx','pdf','json'], redirect:'/multi'},
+  compare: {action:'/compare',accept:'.xlsx,.json,.pdf', label:'השוואת 2 חודשים',              pills:['xlsx','pdf','json'], redirect:'/compare'},
+  cards:   {action:'/cards',  accept:'.xlsx,.json,.pdf', label:'סיכום עד 5 כרטיסי אשראי — חודש אחד', pills:['xlsx','pdf','json'], redirect:'/cards'},
 };
 let curMode = 'credit';
 const form = document.getElementById('main-form');
 const fileInput = document.getElementById('file-input');
 const drop = document.getElementById('drop');
 const fname = document.getElementById('fname');
-const submit = document.getElementById("go-btn");
+const goBtn = document.getElementById("go-btn");
 const pillsEl = document.getElementById('pills');
 const modeLabel = document.getElementById('mode-label');
 
@@ -230,22 +238,21 @@ function setMode(el, mode) {
   fname.textContent = '';
   modeLabel.textContent = m.label;
   pillsEl.innerHTML = m.pills.map(p => `<span class="pill">${p}</span>`).join('');
-  if (mode === 'multi') {
-    // Multi has its own multi-file uploader page
+  if (m.redirect) {
     drop.style.display = 'none';
-    submit.disabled = false;
-    submit.textContent = 'עבור לדף ההשוואה ←';
+    goBtn.disabled = false;
+    goBtn.textContent = 'עבור לדף ←';
   } else {
     drop.style.display = '';
-    submit.textContent = 'העלה קובץ';
-    submit.disabled = !fileInput.files.length;
+    goBtn.textContent = 'העלה קובץ';
+    goBtn.disabled = !fileInput.files.length;
   }
 }
 
 function update() {
   if (fileInput.files.length) {
     fname.textContent = fileInput.files[0].name;
-    submit.disabled = false;
+    goBtn.disabled = false;
   }
 }
 fileInput.addEventListener('change', update);
@@ -257,9 +264,10 @@ drop.addEventListener('drop', e => {
   if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; update(); }
 });
 function handleSubmit() {
-  if (curMode === 'multi') { window.location.href = '/multi'; return; }
+  const m = modes[curMode];
+  if (m.redirect) { window.location.href = m.redirect; return; }
   if (!fileInput.files.length) return;
-  submit.disabled = true; submit.textContent = 'מעבד...';
+  goBtn.disabled = true; goBtn.textContent = 'מעבד...';
   form.submit();
 }
 </script>
@@ -756,6 +764,170 @@ def bank_result(result_id: str):
     html = _cache_read(result_id)
     if not html:
         return redirect("/bank")
+    return html
+
+
+MULTICARD_FORM = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payments — סיכום כרטיסי אשראי</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;background:#042C53;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.page{background:#0C447C;border-radius:16px;padding:28px 24px;max-width:500px;width:100%;overflow:hidden;}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.back-btn{color:#85B7EB;font-size:13px;text-decoration:none;}
+.mode-icon{width:32px;height:32px;background:#185FA5;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+.mode-icon svg{width:16px;height:16px;fill:none;stroke:#E6F1FB;stroke-width:2;}
+.ttl{font-size:18px;font-weight:600;color:#E6F1FB;margin-bottom:4px;}
+.sub{font-size:13px;color:#85B7EB;margin-bottom:16px;}
+.err{background:#4A1B0C;color:#F5C4B3;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px;display:none;}
+.drop-zone{background:#042C53;border:1.5px dashed #378ADD;border-radius:12px;
+           padding:22px;text-align:center;cursor:pointer;transition:border-color .15s;margin-bottom:12px;}
+.drop-zone:hover,.drop-zone.drag{border-color:#85B7EB;}
+.di{width:38px;height:38px;background:#0C447C;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;}
+.di svg{width:17px;height:17px;fill:none;stroke:#378ADD;stroke-width:1.8;}
+.dl{font-size:13px;font-weight:600;color:#B5D4F4;margin-bottom:3px;}
+.ds{font-size:11px;color:#378ADD;}
+.file-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
+.file-item{display:flex;align-items:center;justify-content:space-between;
+           background:#042C53;border-radius:8px;padding:8px 12px;font-size:12px;color:#B5D4F4;}
+.file-item button{background:none;border:none;color:#85B7EB;cursor:pointer;font-size:14px;padding:0 2px;}
+.file-item button:hover{color:#F5C4B3;}
+.footer{display:flex;justify-content:space-between;align-items:center;}
+.sbtn{background:#378ADD;color:#042C53;font-size:14px;font-weight:700;padding:10px 24px;
+      border:none;border-radius:8px;cursor:pointer;}
+.sbtn:hover:not(:disabled){background:#85B7EB;}
+.sbtn:disabled{background:#185FA5;color:#378ADD;cursor:not-allowed;}
+@media(max-width:480px){
+  body{padding:12px;}.page{padding:20px 16px;}
+  .footer{flex-direction:column;gap:10px;align-items:stretch;}
+  .sbtn{width:100%;text-align:center;}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <a class="back-btn" href="/">← חזרה</a>
+    <div class="mode-icon"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div>
+  </div>
+  <div class="ttl">סיכום כרטיסי אשראי</div>
+  <div class="sub">העלו עד 5 קבצים מאותו חודש — Cal, Isracard, xlsx, pdf — ותקבלו דשבורד משולב</div>
+  __ERROR__
+  <div id="drop" class="drop-zone">
+    <input type="file" id="files" accept=".xlsx,.json,.pdf" multiple style="display:none">
+    <div class="di"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></div>
+    <div class="dl">גרור קבצים לכאן</div>
+    <div class="ds">xlsx · pdf · json · עד 5 קבצים מאותו חודש</div>
+  </div>
+  <div class="file-list" id="file-list"></div>
+  <div class="err" id="err-msg"></div>
+  <div class="footer">
+    <span style="font-size:12px;color:#85B7EB;" id="hint">0 קבצים נבחרו</span>
+    <button type="button" id="go" disabled class="sbtn" onclick="submit()">יצירת סיכום</button>
+  </div>
+</div>
+<script>
+  const MAX=5;
+  let selected=new DataTransfer();
+  const dropEl=document.getElementById('drop'),filesEl=document.getElementById('files'),
+        listEl=document.getElementById('file-list'),hint=document.getElementById('hint'),
+        goBtn=document.getElementById('go'),errEl=document.getElementById('err-msg');
+
+  function refresh(){
+    const files=[...selected.files];
+    listEl.innerHTML=files.map((f,i)=>`<div class="file-item"><span>${f.name}</span><button type="button" data-i="${i}">✕</button></div>`).join('');
+    hint.textContent=`${files.length} / ${MAX} קבצים נבחרו`;
+    goBtn.disabled=files.length<2;
+    listEl.querySelectorAll('button[data-i]').forEach(btn=>{
+      btn.onclick=()=>{
+        const idx=parseInt(btn.dataset.i),next=new DataTransfer();
+        [...selected.files].forEach((f,j)=>{if(j!==idx)next.items.add(f);});
+        selected=next;refresh();
+      };
+    });
+  }
+  function addFiles(newFiles){
+    for(const f of newFiles){
+      if(selected.files.length>=MAX)break;
+      const ext=f.name.toLowerCase();
+      if(!ext.endsWith('.xlsx')&&!ext.endsWith('.json')&&!ext.endsWith('.pdf'))continue;
+      if([...selected.files].some(e=>e.name===f.name))continue;
+      selected.items.add(f);
+    }
+    refresh();
+  }
+  async function submit(){
+    if(selected.files.length<2)return;
+    goBtn.disabled=true;goBtn.textContent='מעבד...';errEl.style.display='none';
+    const fd=new FormData();
+    for(const f of selected.files)fd.append('files',f);
+    try{
+      const resp=await fetch('/cards',{method:'POST',body:fd,redirect:'follow'});
+      if(resp.ok){window.location.href=resp.url;}
+      else{
+        const text=await resp.text();
+        errEl.textContent=`שגיאה ${resp.status}: ${text.slice(0,200)}`;
+        errEl.style.display='block';
+        goBtn.disabled=false;goBtn.textContent='יצירת סיכום';
+      }
+    }catch(e){
+      errEl.textContent='שגיאת רשת: '+e.message;errEl.style.display='block';
+      goBtn.disabled=false;goBtn.textContent='יצירת סיכום';
+    }
+  }
+  filesEl.addEventListener('change',()=>{addFiles(filesEl.files);filesEl.value='';});
+  dropEl.addEventListener('click',()=>filesEl.click());
+  dropEl.addEventListener('dragover',e=>{e.preventDefault();dropEl.classList.add('drag');});
+  dropEl.addEventListener('dragleave',()=>dropEl.classList.remove('drag'));
+  dropEl.addEventListener('drop',e=>{e.preventDefault();dropEl.classList.remove('drag');addFiles(e.dataTransfer.files);});
+</script>
+</body>
+</html>
+"""
+
+
+def render_multicard_form(error: str | None = None) -> str:
+    err_html = f'<div class="err" style="display:block">{error}</div>' if error else ""
+    return MULTICARD_FORM.replace("__ERROR__", err_html)
+
+
+@app.get("/cards")
+def cards_form():
+    return render_multicard_form()
+
+
+@app.post("/cards")
+def cards_upload():
+    files = request.files.getlist("files")
+    files = [f for f in files if f and f.filename]
+    if len(files) < 2:
+        return render_multicard_form("יש לבחור לפחות 2 קבצים."), 400
+    if len(files) > 5:
+        return render_multicard_form("ניתן להעלות עד 5 קבצים בלבד."), 400
+    for f in files:
+        if not f.filename.lower().endswith((".xlsx", ".json", ".pdf")):
+            return render_multicard_form("יש להעלות קבצי .xlsx, .json או .pdf בלבד."), 400
+    try:
+        cards_data = [_parse_upload(f) for f in files]
+        html = generate_merged_html(cards_data)
+        result_id = str(uuid.uuid4())
+        _cache_write(result_id, html)
+        _cache_cleanup()
+        return redirect(f"/cards/result/{result_id}")
+    except Exception as e:
+        return render_multicard_form(f"כשל בקריאת הקבצים: {e}"), 400
+
+
+@app.get("/cards/result/<result_id>")
+def cards_result(result_id: str):
+    html = _cache_read(result_id)
+    if not html:
+        return redirect("/cards")
     return html
 
 
